@@ -1,13 +1,14 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAllTransactions, useLookups, useSettings } from '../hooks/useData'
 import { formatMoney, formatDayLabel } from '../lib/format'
-import type { Transaction } from '../lib/types'
+import type { Account, Category, Transaction } from '../lib/types'
+import { CloseIcon } from '../components/icons'
 import EditTransaction from './EditTransaction'
 
 export default function TransactionsScreen() {
   const txns = useAllTransactions()
   const settings = useSettings()
-  const { accountMap, categoryMap } = useLookups()
+  const { accounts, categories, accountMap, categoryMap } = useLookups()
   const [editing, setEditing] = useState<Transaction | null>(null)
   const [filter, setFilter] = useState('')
 
@@ -16,7 +17,8 @@ export default function TransactionsScreen() {
       .filter((t) => {
         if (!filter) return true
         const cat = categoryMap.get(t.categoryId)?.name ?? ''
-        return (t.note + ' ' + cat).toLowerCase().includes(filter.toLowerCase())
+        const acc = accountMap.get(t.accountId)?.name ?? ''
+        return (t.note + ' ' + cat + ' ' + acc).toLowerCase().includes(filter.toLowerCase())
       })
       .sort((a, b) => (b.date === a.date ? b.createdAt - a.createdAt : b.date.localeCompare(a.date)))
     const groups: { date: string; items: Transaction[]; total: number }[] = []
@@ -37,11 +39,12 @@ export default function TransactionsScreen() {
   return (
     <div className="px-5 pt-6 safe-top">
       <h1 className="text-2xl font-bold text-ink-100 mb-4">Activity</h1>
-      <input
+      <SearchBox
         value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-        placeholder="Search notes or categories…"
-        className="w-full bg-ink-800 border border-ink-700 rounded-xl px-4 py-2.5 text-sm text-ink-100 placeholder:text-ink-500 focus:outline-none focus:border-brand-500 mb-5"
+        onChange={setFilter}
+        categories={categories}
+        accounts={accounts}
+        txns={txns}
       />
 
       {grouped.length === 0 && (
@@ -96,6 +99,163 @@ export default function TransactionsScreen() {
       </div>
 
       <EditTransaction txn={editing} onClose={() => setEditing(null)} />
+    </div>
+  )
+}
+
+type Suggestion =
+  | { kind: 'category'; label: string; icon: string }
+  | { kind: 'wallet'; label: string; color: string }
+  | { kind: 'note'; label: string }
+
+// Autocomplete search: suggests categories, wallets and past notes as you type
+// — and lists your categories the moment you focus the empty field, so you can
+// browse when you can't recall what's there.
+function SearchBox({
+  value,
+  onChange,
+  categories,
+  accounts,
+  txns,
+}: {
+  value: string
+  onChange: (v: string) => void
+  categories: Category[] | undefined
+  accounts: Account[] | undefined
+  txns: Transaction[] | undefined
+}) {
+  const [open, setOpen] = useState(false)
+  const [active, setActive] = useState(-1)
+  const boxRef = useRef<HTMLDivElement>(null)
+
+  const suggestions = useMemo<Suggestion[]>(() => {
+    const q = value.trim().toLowerCase()
+    const cats: Suggestion[] = (categories ?? []).map((c) => ({ kind: 'category', label: c.name, icon: c.icon }))
+    const wallets: Suggestion[] = (accounts ?? []).map((a) => ({ kind: 'wallet', label: a.name, color: a.color }))
+    const noteCount = new Map<string, number>()
+    for (const t of txns ?? []) {
+      const n = t.note?.trim()
+      if (n) noteCount.set(n, (noteCount.get(n) ?? 0) + 1)
+    }
+    const notes: Suggestion[] = [...noteCount.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([label]) => ({ kind: 'note', label }))
+
+    let all = [...cats, ...wallets, ...notes]
+    if (q) all = all.filter((s) => s.label.toLowerCase().includes(q) && s.label.toLowerCase() !== q)
+
+    const seen = new Set<string>()
+    const out: Suggestion[] = []
+    for (const s of all) {
+      const key = s.kind + ':' + s.label.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(s)
+      if (out.length >= 8) break
+    }
+    return out
+  }, [value, categories, accounts, txns])
+
+  // Close when tapping/clicking outside the box.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  useEffect(() => setActive(-1), [value])
+
+  function choose(s: Suggestion) {
+    onChange(s.label)
+    setOpen(false)
+    setActive(-1)
+  }
+
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'Escape') return setOpen(false)
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      if (!open) return setOpen(true)
+      setActive((i) => Math.min(i + 1, suggestions.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setActive((i) => Math.max(i - 1, 0))
+    } else if (e.key === 'Enter') {
+      if (active >= 0 && suggestions[active]) {
+        e.preventDefault()
+        choose(suggestions[active])
+      } else {
+        setOpen(false)
+      }
+    }
+  }
+
+  const showDropdown = open && suggestions.length > 0
+
+  return (
+    <div ref={boxRef} className="relative mb-5">
+      <div className="flex items-center bg-ink-800 border border-ink-700 rounded-xl px-4 py-2.5 focus-within:border-brand-500">
+        <input
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value)
+            setOpen(true)
+          }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={onKeyDown}
+          placeholder="Search category, wallet or note…"
+          role="combobox"
+          aria-expanded={showDropdown}
+          aria-autocomplete="list"
+          className="flex-1 bg-transparent text-sm text-ink-100 placeholder:text-ink-500 focus:outline-none"
+        />
+        {value && (
+          <button
+            onClick={() => {
+              onChange('')
+              setOpen(true)
+            }}
+            className="ml-2 text-ink-500 hover:text-ink-200"
+            aria-label="Clear search"
+          >
+            <CloseIcon width={16} height={16} />
+          </button>
+        )}
+      </div>
+
+      {showDropdown && (
+        <div className="absolute z-20 mt-1 w-full rounded-xl bg-ink-800 border border-ink-700 shadow-xl overflow-hidden">
+          {!value.trim() && (
+            <div className="px-3 pt-2 pb-1 text-[11px] uppercase tracking-wide text-ink-500">Tap to filter</div>
+          )}
+          <ul className="max-h-72 overflow-y-auto no-scrollbar py-1">
+            {suggestions.map((s, i) => (
+              <li key={s.kind + s.label}>
+                <button
+                  // onMouseDown (not onClick) so selection fires before the
+                  // input's blur can close the dropdown.
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    choose(s)
+                  }}
+                  className={`w-full flex items-center gap-3 px-3 py-2 text-left text-sm ${
+                    i === active ? 'bg-ink-700' : 'hover:bg-ink-700/60'
+                  }`}
+                >
+                  {s.kind === 'category' && <span className="text-base">{s.icon}</span>}
+                  {s.kind === 'wallet' && <span className="h-3 w-3 rounded-full" style={{ backgroundColor: s.color }} />}
+                  {s.kind === 'note' && <span className="text-ink-500">📝</span>}
+                  <span className="flex-1 text-ink-100 truncate">{s.label}</span>
+                  <span className="text-[11px] text-ink-500 capitalize">{s.kind}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }
