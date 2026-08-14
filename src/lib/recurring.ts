@@ -55,6 +55,21 @@ function clampToMonth(year: number, month: number, day: number): number {
   return Math.min(Math.max(day, 1), last)
 }
 
+// What one rule costs in an average month, normalising weekly and annual
+// charges so they can be summed into a single "fixed cost per month" figure.
+export function monthlyEquivalent(rule: RecurringRule): number {
+  if (rule.cadence === 'weekly') return (rule.amount * 52) / 12
+  if (rule.cadence === 'annual') return rule.amount / 12
+  return rule.amount
+}
+
+// Sum of the monthly-equivalent cost of every active, live rule.
+export function monthlyCommitment(rules: RecurringRule[]): number {
+  return rules
+    .filter((r) => r.active && !r.deleted)
+    .reduce((sum, r) => sum + monthlyEquivalent(r), 0)
+}
+
 export function cadenceLabel(rule: RecurringRule): string {
   const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
   if (rule.cadence === 'weekly') return `Every ${DOW[((rule.dayOfMonth % 7) + 7) % 7]}`

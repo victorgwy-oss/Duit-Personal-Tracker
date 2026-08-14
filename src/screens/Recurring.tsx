@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAccounts, useCategories, useRecurring, useSettings } from '../hooks/useData'
 import { upsertRecurring, deleteRecurring } from '../lib/repo'
 import { pendingConfirmations, confirmPending, skipPending, type PendingConfirm } from '../lib/autopost'
-import { cadenceLabel } from '../lib/recurring'
+import { cadenceLabel, monthlyEquivalent, monthlyCommitment } from '../lib/recurring'
 import { formatMoney, formatShortDate, todayISO } from '../lib/format'
 import { uid } from '../db'
 import Sheet from '../components/Sheet'
@@ -15,6 +15,10 @@ export default function RecurringScreen() {
   const [editing, setEditing] = useState<RecurringRule | 'new' | null>(null)
   const [pending, setPending] = useState<PendingConfirm[]>([])
   const currency = settings?.currency ?? 'RM'
+
+  const activeRules = (rules ?? []).filter((r) => r.active)
+  const monthlyTotal = monthlyCommitment(rules ?? [])
+  const hasNonMonthly = activeRules.some((r) => r.cadence !== 'monthly')
 
   async function refreshPending() {
     setPending(await pendingConfirmations())
@@ -29,6 +33,20 @@ export default function RecurringScreen() {
       <p className="text-sm text-ink-400 mb-5">
         Set these once — insurance, subscriptions, bills. They post themselves each month, even when the app is closed.
       </p>
+
+      {/* Fixed cost per month: what you're committed to before any spending */}
+      {activeRules.length > 0 && (
+        <div className="rounded-2xl bg-gradient-to-br from-ink-800 to-ink-900 border border-ink-800 p-4 mb-5">
+          <div className="text-xs text-ink-400">Fixed cost every month</div>
+          <div className="text-3xl font-bold text-ink-100 tabular-nums mt-0.5">
+            {formatMoney(monthlyTotal, currency)}
+          </div>
+          <div className="text-xs text-ink-500 mt-0.5">
+            {activeRules.length} recurring charge{activeRules.length > 1 ? 's' : ''}
+            {hasNonMonthly ? ' · weekly & yearly averaged to a monthly figure' : ' · due even if you spend nothing else'}
+          </div>
+        </div>
+      )}
 
       {/* Review tray for confirm-mode rules */}
       {pending.length > 0 && (
@@ -83,7 +101,14 @@ export default function RecurringScreen() {
                 {cadenceLabel(r)} · {r.mode === 'auto' ? 'auto-posts' : 'asks first'}
               </div>
             </div>
-            <span className="text-sm font-medium text-ink-100 tabular-nums">{formatMoney(r.amount, currency)}</span>
+            <div className="text-right">
+              <span className="text-sm font-medium text-ink-100 tabular-nums">{formatMoney(r.amount, currency)}</span>
+              {r.cadence !== 'monthly' && (
+                <div className="text-xs text-ink-500 tabular-nums">
+                  ≈ {formatMoney(monthlyEquivalent(r), currency)}/mo
+                </div>
+              )}
+            </div>
           </button>
         ))}
       </div>
