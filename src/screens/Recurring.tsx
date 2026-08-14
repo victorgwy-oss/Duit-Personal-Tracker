@@ -228,18 +228,25 @@ function RuleEditor({ rule, onClose }: { rule: RecurringRule | null; onClose: ()
               ))}
             </div>
           ) : cadence === 'monthly' ? (
-            <div className="flex items-center gap-2 text-sm text-ink-300">
-              On day
-              <select
-                value={dayOfMonth}
-                onChange={(e) => setDayOfMonth(Number(e.target.value))}
-                className="bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-ink-100"
-              >
-                {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
-              </select>
-              of each month
+            <div>
+              <div className="flex items-center gap-2 text-sm text-ink-300">
+                On day
+                <select
+                  value={dayOfMonth}
+                  onChange={(e) => setDayOfMonth(Number(e.target.value))}
+                  className="bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-ink-100"
+                >
+                  {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+                of each month
+              </div>
+              {dayOfMonth > 28 && (
+                <p className="text-xs text-ink-500 mt-1.5">
+                  Shorter months post on their last day (e.g. day {dayOfMonth} → Feb 28).
+                </p>
+              )}
             </div>
           ) : (
             <div className="flex items-center gap-2 text-sm text-ink-300">
