@@ -32,6 +32,7 @@ export interface DashboardData {
   projectedSavings: number // if spending continues at current run-rate
   savingsIfStopNow: number // income − spent so far − committed recurring
   savingsTarget: number
+  income: number // income resolved for this cycle
   daysLeft: number
   onTrack: boolean
 }
@@ -43,6 +44,9 @@ export function computeDashboard(
   recurring: RecurringRule[],
   settings: Settings,
   cycle: Cycle,
+  // Income resolved for THIS cycle from the user's income streams (salary,
+  // rental, business, …). Lets the projection react month-to-month.
+  cycleIncome: number,
 ): DashboardData {
   const catMap = new Map(categories.map((c) => [c.id, c]))
   const active = txns.filter((t) => !t.deleted)
@@ -110,7 +114,7 @@ export function computeDashboard(
   const projectedRemainingVariable = Math.max(dailyVariable * daysLeft, 0)
 
   const projectedTotalSpend = totalSpent + remainingRecurring + projectedRemainingVariable
-  const income = settings.monthlyIncome
+  const income = cycleIncome
   const projectedSavings = income - projectedTotalSpend
   const savingsIfStopNow = income - totalSpent - remainingRecurring
   const savingsTarget = settings.savingsTarget
@@ -133,6 +137,7 @@ export function computeDashboard(
     projectedSavings,
     savingsIfStopNow,
     savingsTarget,
+    income,
     daysLeft,
     onTrack: projectedSavings >= savingsTarget,
   }

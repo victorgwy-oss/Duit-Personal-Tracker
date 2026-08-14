@@ -5,6 +5,8 @@ import type {
   Transaction,
   RecurringRule,
   Settings,
+  IncomeSource,
+  IncomeOverride,
 } from './lib/types'
 
 // Local-first store. This is the single source the UI reads/writes.
@@ -16,6 +18,8 @@ export class FinanceDB extends Dexie {
   transactions!: Table<Transaction, string>
   recurring!: Table<RecurringRule, string>
   settings!: Table<Settings, string>
+  incomeSources!: Table<IncomeSource, string>
+  incomeOverrides!: Table<IncomeOverride, string>
 
   constructor() {
     super('duit-finance')
@@ -25,6 +29,11 @@ export class FinanceDB extends Dexie {
       transactions: 'id, date, accountId, categoryId, source, reconciled, deleted',
       recurring: 'id, active, deleted',
       settings: 'id',
+    })
+    // v2: granular income — multiple streams, each overridable per month.
+    this.version(2).stores({
+      incomeSources: 'id, active, deleted',
+      incomeOverrides: 'id, sourceId, monthKey, deleted',
     })
   }
 }
@@ -81,4 +90,28 @@ let seedPromise: Promise<void> | null = null
 export function ensureSeeded() {
   if (!seedPromise) seedPromise = seed()
   return seedPromise
+}
+
+// Income sources arrived after the single `settings.monthlyIncome` figure, so
+// migrate that number into a first "Salary" stream the very first time. Runs
+// once; after that the user manages their own streams.
+async function seedIncome() {
+  const count = await db.incomeSources.count()
+  if (count > 0) return
+  const s = await db.settings.get('singleton')
+  const base = s?.monthlyIncome ?? 0
+  await db.incomeSources.add({
+    id: uid(),
+    name: 'Salary',
+    defaultAmount: base,
+    color: '#22c55e',
+    active: true,
+    updatedAt: now(),
+  })
+}
+
+let incomeSeedPromise: Promise<void> | null = null
+export function ensureIncomeSeeded() {
+  if (!incomeSeedPromise) incomeSeedPromise = seedIncome()
+  return incomeSeedPromise
 }

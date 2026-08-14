@@ -4,7 +4,14 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY, isOnlineMode } from './config'
 
 export { SUPABASE_URL, SUPABASE_ANON_KEY, isOnlineMode }
 
-export type SyncTable = 'transactions' | 'accounts' | 'categories' | 'recurring' | 'settings'
+export type SyncTable =
+  | 'transactions'
+  | 'accounts'
+  | 'categories'
+  | 'recurring'
+  | 'settings'
+  | 'incomeSources'
+  | 'incomeOverrides'
 
 // --- Table mapping between the local (camelCase) store and Postgres (snake_case) ---
 interface TableConfig {
@@ -53,13 +60,32 @@ const TABLES: Record<SyncTable, TableConfig> = {
     toRemote: (r, uid) => ({ user_id: uid, monthly_income: r.monthlyIncome, savings_target: r.savingsTarget, currency: r.currency, cycle_start_day: r.cycleStartDay, onboarded: !!r.onboarded, updated_at: r.updatedAt }),
     fromRemote: (x) => ({ id: 'singleton', monthlyIncome: num(x.monthly_income), savingsTarget: num(x.savings_target), currency: x.currency, cycleStartDay: num(x.cycle_start_day), onboarded: !!x.onboarded, updatedAt: num(x.updated_at) }),
   },
+  incomeSources: {
+    remote: 'income_sources',
+    dexie: () => db.incomeSources,
+    toRemote: (r, uid) => ({ id: r.id, user_id: uid, name: r.name, default_amount: r.defaultAmount, color: r.color, active: !!r.active, updated_at: r.updatedAt, deleted: !!r.deleted }),
+    fromRemote: (x) => ({ id: x.id, name: x.name, defaultAmount: num(x.default_amount), color: x.color, active: !!x.active, updatedAt: num(x.updated_at), deleted: !!x.deleted }),
+  },
+  incomeOverrides: {
+    remote: 'income_overrides',
+    dexie: () => db.incomeOverrides,
+    toRemote: (r, uid) => ({ id: r.id, user_id: uid, source_id: r.sourceId, month_key: r.monthKey, amount: r.amount, updated_at: r.updatedAt, deleted: !!r.deleted }),
+    fromRemote: (x) => ({ id: x.id, sourceId: x.source_id, monthKey: x.month_key, amount: num(x.amount), updatedAt: num(x.updated_at), deleted: !!x.deleted }),
+  },
 }
 
-const TABLE_ORDER: SyncTable[] = ['settings', 'accounts', 'categories', 'recurring', 'transactions']
+const TABLE_ORDER: SyncTable[] = ['settings', 'accounts', 'categories', 'recurring', 'transactions', 'incomeSources', 'incomeOverrides']
 
 // --- Offline write queue (survives reloads / offline) ---
 const QUEUE_KEY = 'duit_sync_queue'
-const WATERMARK_KEY = 'duit_sync_watermark'
+const WATERMARK_KEY = 'duit_sync_watermark' // legacy global watermark (migrated per-table)
+const WATERMARK_PREFIX = 'duit_sync_watermark:'
+// `updated_at` is stamped with the WRITING device's clock, so two devices whose
+// clocks differ can disagree about ordering. When pulling, rewind the watermark
+// by this window so an edit that another device stamped slightly "in the past"
+// is still fetched (last-write-wins then reconciles it). Comfortably larger than
+// any realistic device clock skew; the re-fetched slice is tiny at this scale.
+const PULL_SKEW_WINDOW_MS = 2 * 24 * 60 * 60 * 1000 // 2 days
 
 interface QueuedChange { table: SyncTable; row: any }
 
@@ -126,15 +152,28 @@ export async function flushQueue(): Promise<void> {
 }
 
 // --- Pull remote changes into the local store ---
-function getWatermark(): number { return Number(localStorage.getItem(WATERMARK_KEY) ?? '0') }
-function setWatermark(v: number) { localStorage.setItem(WATERMARK_KEY, String(v)) }
+// Per-table watermark so a high-timestamp write in one table (e.g. an
+// auto-posted transaction) can't advance the cursor past a lower-timestamp
+// edit in another table (e.g. settings) and cause it to be skipped.
+function getWatermark(table: SyncTable): number {
+  const v = localStorage.getItem(WATERMARK_PREFIX + table)
+  if (v != null) return Number(v)
+  // First run after upgrade: fall back to the old shared watermark.
+  return Number(localStorage.getItem(WATERMARK_KEY) ?? '0')
+}
+function setWatermark(table: SyncTable, v: number) {
+  localStorage.setItem(WATERMARK_PREFIX + table, String(v))
+}
 
 export async function pull(): Promise<void> {
   if (!supabase || !userId) return
-  const since = getWatermark()
-  let maxSeen = since
   for (const table of TABLE_ORDER) {
     const cfg = TABLES[table]
+    const wm = getWatermark(table)
+    // Rewind by the skew window so edits another device stamped just before our
+    // cursor are still fetched. maxSeen still advances to the true maximum.
+    const since = Math.max(0, wm - PULL_SKEW_WINDOW_MS)
+    let maxSeen = wm
     const { data, error } = await supabase
       .from(cfg.remote)
       .select('*')
@@ -151,8 +190,8 @@ export async function pull(): Promise<void> {
       }
       if (local.updatedAt > maxSeen) maxSeen = local.updatedAt
     }
+    if (maxSeen > wm) setWatermark(table, maxSeen)
   }
-  if (maxSeen > since) setWatermark(maxSeen)
 }
 
 // Push every local row up (first-device bootstrap). Idempotent upserts.

@@ -7,21 +7,23 @@ import { signOut } from '../lib/supabase'
 import { UploadIcon, DownloadIcon } from '../components/icons'
 import ManageLists from './ManageLists'
 import ImportStatement from './ImportStatement'
+import IncomeSheet from '../components/IncomeSheet'
+import BudgetSheet from '../components/BudgetSheet'
 
 export default function SettingsScreen() {
   const settings = useSettings()
-  const [income, setIncome] = useState('')
   const [target, setTarget] = useState('')
   const [cycleStartDay, setCycleStartDay] = useState('1')
   const [savedFlash, setSavedFlash] = useState(false)
   const [manage, setManage] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  const [incomeOpen, setIncomeOpen] = useState(false)
+  const [budgetOpen, setBudgetOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const [importMsg, setImportMsg] = useState('')
 
   useEffect(() => {
     if (!settings) return
-    setIncome(String(settings.monthlyIncome))
     setTarget(String(settings.savingsTarget))
     setCycleStartDay(String(settings.cycleStartDay))
   }, [settings])
@@ -55,9 +57,20 @@ export default function SettingsScreen() {
       </div>
 
       <Section title="Money">
-        <Row label="Monthly income">
-          <MoneyInput value={income} onChange={setIncome} onBlur={() => persist({ monthlyIncome: parseFloat(income || '0') })} />
-        </Row>
+        <button
+          onClick={() => setIncomeOpen(true)}
+          className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-ink-800 border border-ink-700 text-left"
+        >
+          <span className="text-sm text-ink-300">Income streams</span>
+          <span className="text-sm text-brand-400">Manage →</span>
+        </button>
+        <button
+          onClick={() => setBudgetOpen(true)}
+          className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-ink-800 border border-ink-700 text-left"
+        >
+          <span className="text-sm text-ink-300">Category budgets</span>
+          <span className="text-sm text-brand-400">Manage →</span>
+        </button>
         <Row label="Savings target">
           <MoneyInput value={target} onChange={setTarget} onBlur={() => persist({ savingsTarget: parseFloat(target || '0') })} />
         </Row>
@@ -144,6 +157,8 @@ export default function SettingsScreen() {
 
       <ManageLists open={manage} onClose={() => setManage(false)} />
       <ImportStatement open={importOpen} onClose={() => setImportOpen(false)} />
+      <IncomeSheet open={incomeOpen} onClose={() => setIncomeOpen(false)} />
+      <BudgetSheet open={budgetOpen} onClose={() => setBudgetOpen(false)} />
     </div>
   )
 }

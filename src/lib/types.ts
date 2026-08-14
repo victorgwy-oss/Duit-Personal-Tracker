@@ -81,3 +81,28 @@ export interface Settings {
   onboarded: boolean
   updatedAt: number
 }
+
+// A recurring stream of money in — salary, rent, business revenue, etc.
+// `defaultAmount` is what it earns in a typical month; individual months can be
+// overridden (see IncomeOverride) for streams that fluctuate.
+export interface IncomeSource {
+  id: string
+  name: string
+  defaultAmount: number
+  color: string
+  active: boolean
+  updatedAt: number
+  deleted?: boolean
+}
+
+// Per-month amount for one income source, keyed to a cycle month ("2026-08").
+// Its presence means the user set a specific figure for that month; absence
+// means the source's defaultAmount applies.
+export interface IncomeOverride {
+  id: string // `${sourceId}:${monthKey}`
+  sourceId: string
+  monthKey: string // cycle key, e.g. "2026-08"
+  amount: number
+  updatedAt: number
+  deleted?: boolean
+}

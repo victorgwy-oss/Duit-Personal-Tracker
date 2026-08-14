@@ -1,14 +1,27 @@
 import { useMemo, useState } from 'react'
-import { useAccounts, useCategories, useRecurring, useSettings, useTransactionsInRange } from '../hooks/useData'
+import {
+  useAccounts,
+  useCategories,
+  useIncomeOverrides,
+  useIncomeSources,
+  useRecurring,
+  useSettings,
+  useTransactionsInRange,
+} from '../hooks/useData'
 import { getCycle, shiftCycle, cycleStartISO, cycleEndISO, cycleProgress } from '../lib/cycle'
 import { computeDashboard } from '../lib/selectors'
+import { resolveIncome } from '../lib/income'
 import { formatMoney, formatMoneyShort, formatShortDate } from '../lib/format'
 import { cadenceLabel } from '../lib/recurring'
 import { ChevronLeft, ChevronRight, AlertIcon, CameraIcon, CheckIcon } from '../components/icons'
+import IncomeSheet from '../components/IncomeSheet'
+import BudgetSheet from '../components/BudgetSheet'
 
 export default function Dashboard({ onScan }: { onScan: () => void }) {
   const settings = useSettings()
   const [offset, setOffset] = useState(0)
+  const [incomeOpen, setIncomeOpen] = useState(false)
+  const [budgetOpen, setBudgetOpen] = useState(false)
 
   const cycle = useMemo(() => {
     if (!settings) return null
@@ -22,11 +35,18 @@ export default function Dashboard({ onScan }: { onScan: () => void }) {
   const categories = useCategories()
   const accounts = useAccounts()
   const recurring = useRecurring()
+  const incomeSources = useIncomeSources()
+  const incomeOverrides = useIncomeOverrides()
+
+  const cycleIncome = useMemo(
+    () => resolveIncome(incomeSources ?? [], incomeOverrides ?? [], cycle?.key ?? '').total,
+    [incomeSources, incomeOverrides, cycle],
+  )
 
   const data = useMemo(() => {
     if (!cycle || !txns || !categories || !accounts || !recurring || !settings) return null
-    return computeDashboard(txns, categories, accounts, recurring, settings, cycle)
-  }, [cycle, txns, categories, accounts, recurring, settings])
+    return computeDashboard(txns, categories, accounts, recurring, settings, cycle, cycleIncome)
+  }, [cycle, txns, categories, accounts, recurring, settings, cycleIncome])
 
   if (!settings || !cycle || !data) return <div className="p-6 text-ink-500">Loading…</div>
 
@@ -34,7 +54,7 @@ export default function Dashboard({ onScan }: { onScan: () => void }) {
   const currency = settings.currency
 
   return (
-    <div className="px-5 pt-6 safe-top">
+    <div className="px-5 pt-6 pb-16 safe-top">
       {/* Cycle switcher */}
       <div className="flex items-center justify-between mb-5">
         <button onClick={() => setOffset(offset - 1)} className="p-2 text-ink-400 hover:text-ink-100">
@@ -80,12 +100,17 @@ export default function Dashboard({ onScan }: { onScan: () => void }) {
       <CardBalanceTile balance={data.cardBalance} currency={currency} onScan={onScan} />
 
       {/* Savings projection */}
-      <SavingsProjection data={data} currency={currency} />
+      <SavingsProjection data={data} currency={currency} onEditIncome={() => setIncomeOpen(true)} />
 
       {/* Budget bars */}
-      {data.byCategory.some((c) => c.budget > 0) && (
-        <section className="mt-6">
-          <h3 className="text-sm font-semibold text-ink-300 mb-3">Budgets</h3>
+      <section className="mt-6">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-ink-300">Budgets</h3>
+          <button onClick={() => setBudgetOpen(true)} className="text-xs font-medium text-brand-400">
+            {data.byCategory.some((c) => c.budget > 0) ? 'Edit' : '+ Add budget'}
+          </button>
+        </div>
+        {data.byCategory.some((c) => c.budget > 0) ? (
           <div className="space-y-3">
             {data.byCategory
               .filter((c) => c.budget > 0)
@@ -93,8 +118,15 @@ export default function Dashboard({ onScan }: { onScan: () => void }) {
                 <BudgetBar key={c.category.id} spent={c.spent} budget={c.budget} name={c.category.name} icon={c.category.icon} currency={currency} fraction={fraction} />
               ))}
           </div>
-        </section>
-      )}
+        ) : (
+          <button
+            onClick={() => setBudgetOpen(true)}
+            className="w-full py-4 rounded-xl border border-dashed border-ink-600 text-ink-400 text-sm"
+          >
+            Set a monthly cap on any category — food, transport, shopping…
+          </button>
+        )}
+      </section>
 
       {/* Committed upcoming recurring */}
       {data.upcoming.length > 0 && (
@@ -135,6 +167,9 @@ export default function Dashboard({ onScan }: { onScan: () => void }) {
           </div>
         </section>
       )}
+
+      <IncomeSheet open={incomeOpen} onClose={() => setIncomeOpen(false)} initialOffset={offset} />
+      <BudgetSheet open={budgetOpen} onClose={() => setBudgetOpen(false)} />
     </div>
   )
 }
@@ -159,7 +194,15 @@ function CardBalanceTile({ balance, currency, onScan }: { balance: number; curre
   )
 }
 
-function SavingsProjection({ data, currency }: { data: ReturnType<typeof computeDashboard>; currency: string }) {
+function SavingsProjection({
+  data,
+  currency,
+  onEditIncome,
+}: {
+  data: ReturnType<typeof computeDashboard>
+  currency: string
+  onEditIncome: () => void
+}) {
   const onTrack = data.onTrack
   const projected = data.projectedSavings
   const pct = data.savingsTarget > 0 ? Math.max(Math.min(projected / data.savingsTarget, 1), 0) : 0
@@ -200,6 +243,13 @@ function SavingsProjection({ data, currency }: { data: ReturnType<typeof compute
           style={{ width: `${pct * 100}%` }}
         />
       </div>
+      <button
+        onClick={onEditIncome}
+        className="mt-3 w-full flex items-center justify-between text-xs text-ink-400 hover:text-ink-200"
+      >
+        <span>Income this month {formatMoney(data.income, currency)}</span>
+        <span className="text-brand-400 font-medium">Adjust →</span>
+      </button>
     </div>
   )
 }

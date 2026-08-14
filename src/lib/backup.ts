@@ -13,22 +13,26 @@ interface BackupFile {
     transactions: unknown[]
     recurring: unknown[]
     settings: unknown[]
+    incomeSources?: unknown[]
+    incomeOverrides?: unknown[]
   }
 }
 
 export async function exportBackup(): Promise<void> {
-  const [accounts, categories, transactions, recurring, settings] = await Promise.all([
+  const [accounts, categories, transactions, recurring, settings, incomeSources, incomeOverrides] = await Promise.all([
     db.accounts.toArray(),
     db.categories.toArray(),
     db.transactions.toArray(),
     db.recurring.toArray(),
     db.settings.toArray(),
+    db.incomeSources.toArray(),
+    db.incomeOverrides.toArray(),
   ])
   const payload: BackupFile = {
     app: 'duit-finance',
     version: 1,
     exportedAt: new Date().toISOString(),
-    data: { accounts, categories, transactions, recurring, settings },
+    data: { accounts, categories, transactions, recurring, settings, incomeSources, incomeOverrides },
   }
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
@@ -45,18 +49,26 @@ export async function importBackup(file: File): Promise<{ transactions: number }
   if (parsed.app !== 'duit-finance') {
     throw new Error('Not a Duit backup file.')
   }
-  const { accounts, categories, transactions, recurring, settings } = parsed.data
-  await db.transaction('rw', db.accounts, db.categories, db.transactions, db.recurring, db.settings, async () => {
-    await db.accounts.clear()
-    await db.categories.clear()
-    await db.transactions.clear()
-    await db.recurring.clear()
-    await db.settings.clear()
-    await db.accounts.bulkAdd(accounts as never)
-    await db.categories.bulkAdd(categories as never)
-    await db.transactions.bulkAdd(transactions as never)
-    await db.recurring.bulkAdd(recurring as never)
-    await db.settings.bulkAdd(settings as never)
-  })
+  const { accounts, categories, transactions, recurring, settings, incomeSources, incomeOverrides } = parsed.data
+  await db.transaction(
+    'rw',
+    [db.accounts, db.categories, db.transactions, db.recurring, db.settings, db.incomeSources, db.incomeOverrides],
+    async () => {
+      await db.accounts.clear()
+      await db.categories.clear()
+      await db.transactions.clear()
+      await db.recurring.clear()
+      await db.settings.clear()
+      await db.incomeSources.clear()
+      await db.incomeOverrides.clear()
+      await db.accounts.bulkAdd(accounts as never)
+      await db.categories.bulkAdd(categories as never)
+      await db.transactions.bulkAdd(transactions as never)
+      await db.recurring.bulkAdd(recurring as never)
+      await db.settings.bulkAdd(settings as never)
+      if (incomeSources) await db.incomeSources.bulkAdd(incomeSources as never)
+      if (incomeOverrides) await db.incomeOverrides.bulkAdd(incomeOverrides as never)
+    },
+  )
   return { transactions: (transactions as unknown[]).length }
 }

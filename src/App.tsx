@@ -1,21 +1,23 @@
 import { useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { useSettings } from './hooks/useData'
+import { ensureIncomeSeeded } from './db'
 import { runAutoPost } from './lib/autopost'
 import { isOnlineMode } from './lib/config'
 import { getSession, onAuthChange } from './lib/supabase'
 import { setUser, bootstrap, startAutoSync } from './lib/sync'
 import Auth from './screens/Auth'
-import { HomeIcon, ListIcon, RepeatIcon, GearIcon, PlusIcon, CameraIcon } from './components/icons'
+import { HomeIcon, ListIcon, RepeatIcon, GearIcon, PlusIcon, CameraIcon, ChartIcon } from './components/icons'
 import Dashboard from './screens/Dashboard'
 import TransactionsScreen from './screens/Transactions'
 import RecurringScreen from './screens/Recurring'
 import SettingsScreen from './screens/Settings'
+import Analytics from './screens/Analytics'
 import QuickAdd from './screens/QuickAdd'
 import ReceiptScanner from './screens/ReceiptScanner'
 import Onboarding from './screens/Onboarding'
 
-type Tab = 'home' | 'txns' | 'recurring' | 'settings'
+type Tab = 'home' | 'txns' | 'analytics' | 'recurring' | 'settings'
 
 export default function App() {
   const settings = useSettings()
@@ -45,9 +47,13 @@ export default function App() {
   }, [])
 
   // Post any due recurring charges the moment the app opens (mirrors the
-  // server-side cron). Runs after data is ready.
+  // server-side cron). Runs after data is ready. Also migrate the legacy single
+  // income figure into an income stream the first time.
   useEffect(() => {
-    if (settings?.onboarded) runAutoPost()
+    if (settings?.onboarded) {
+      runAutoPost()
+      ensureIncomeSeeded()
+    }
   }, [settings?.onboarded])
 
   if (isOnlineMode && !authReady) return <SplashScreen />
@@ -60,6 +66,7 @@ export default function App() {
       <main className="flex-1 pb-28">
         {tab === 'home' && <Dashboard onScan={() => setScanner(true)} />}
         {tab === 'txns' && <TransactionsScreen />}
+        {tab === 'analytics' && <Analytics />}
         {tab === 'recurring' && <RecurringScreen />}
         {tab === 'settings' && <SettingsScreen />}
       </main>
@@ -94,12 +101,13 @@ function BottomNav({ tab, setTab }: { tab: Tab; setTab: (t: Tab) => void }) {
   const items: { id: Tab; label: string; Icon: typeof HomeIcon }[] = [
     { id: 'home', label: 'Home', Icon: HomeIcon },
     { id: 'txns', label: 'Activity', Icon: ListIcon },
+    { id: 'analytics', label: 'Analytics', Icon: ChartIcon },
     { id: 'recurring', label: 'Recurring', Icon: RepeatIcon },
     { id: 'settings', label: 'Settings', Icon: GearIcon },
   ]
   return (
     <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-ink-900/95 backdrop-blur border-t border-ink-800 safe-bottom z-40">
-      <div className="grid grid-cols-4">
+      <div className="grid grid-cols-5">
         {items.map(({ id, label, Icon }) => {
           const active = tab === id
           return (
