@@ -6,5 +6,8 @@ dist-ssr
 .env.*
 !.env.example
 .DS_Store
+
+# Personal financial data — never commit
+*.csv
 .vscode/*
 !.vscode/extensions.json

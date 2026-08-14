@@ -1,6 +1,7 @@
 import { db } from '../db'
-import { addTransaction } from './repo'
+import { addTransaction, upsertCategory, upsertAccount } from './repo'
 import { toISO } from './format'
+import type { CategoryGroup } from './types'
 
 // Parse a pasted / uploaded statement (CSV, TSV, or copied text) and turn rows
 // into candidate transactions, flagging likely duplicates so recurring/manual
@@ -131,6 +132,16 @@ export function parseDate(v: string): string | null {
       return iso(year, mon + 1, +m[1])
     }
   }
+  // Mon dd, yyyy  (e.g. "Aug 01, 2026 9:36 AM")
+  m = s.match(/^([A-Za-z]{3,})\s+(\d{1,2}),?\s+(\d{2,4})/)
+  if (m) {
+    const mon = monthIndex(m[1])
+    if (mon >= 0) {
+      let year = +m[3]
+      if (year < 100) year += 2000
+      return iso(year, mon + 1, +m[2])
+    }
+  }
   return null
 }
 
@@ -182,4 +193,199 @@ export async function commitImport(
     n++
   }
   return n
+}
+
+// ===========================================================================
+// Tracker migration — richer import for exports from other budgeting apps that
+// carry TYPE (income/expense), CATEGORY and ACCOUNT columns. Categories and
+// wallets are mapped to existing ones (or auto-created), and income rows are
+// skipped by default since the app models income as a monthly figure.
+// ===========================================================================
+
+export interface FullColumnMap {
+  date: number
+  amount: number
+  type: number | null
+  category: number | null
+  account: number | null
+  note: number
+}
+
+const nz = (n: number): number | null => (n >= 0 ? n : null)
+
+// Detect columns from a header row by name. Returns null if it doesn't look
+// like a labelled export (no recognisable date/amount headers).
+export function detectHeaderColumns(header: string[]): FullColumnMap | null {
+  const idx = (re: RegExp) => header.findIndex((h) => re.test((h ?? '').trim().toLowerCase()))
+  const date = idx(/\b(time|date)\b/)
+  const amount = idx(/\b(amount|amt|value)\b/)
+  if (date < 0 || amount < 0) return null
+  const note = idx(/\b(note|notes|desc|description|memo|remark|detail)\b/)
+  return {
+    date,
+    amount,
+    type: nz(idx(/\b(type|in\s*\/\s*out|direction|flow)\b/)),
+    category: nz(idx(/\b(category|categories|cat)\b/)),
+    account: nz(idx(/\b(account|wallet|source)\b/)),
+    note: note >= 0 ? note : amount,
+  }
+}
+
+// A cell like "(+) Income" / "Credit" => money in.
+export function isIncomeType(v: string): boolean {
+  return /(\(\+\)|\bincome\b|\bcredit\b|\bdeposit\b|\bin\b)/i.test(v ?? '')
+}
+
+export interface TrackerCandidate {
+  date: string
+  amount: number
+  isIncome: boolean
+  categoryName: string
+  accountName: string
+  note: string
+  duplicate: boolean
+  include: boolean
+}
+
+export async function buildTrackerCandidates(
+  rows: string[][],
+  map: FullColumnMap,
+  hasHeader: boolean,
+): Promise<TrackerCandidate[]> {
+  const body = hasHeader ? rows.slice(1) : rows
+  const existing = await db.transactions.filter((t) => !t.deleted).toArray()
+  const existingKeys = new Set(existing.map((t) => key(t.date, Math.abs(t.amount), t.note)))
+
+  const out: TrackerCandidate[] = []
+  const seen = new Set<string>()
+  for (const r of body) {
+    const date = parseDate(r[map.date] ?? '')
+    const amt = parseAmount(r[map.amount] ?? '')
+    if (date === null || amt === null) continue
+    const amount = Math.abs(amt)
+    const isIncome = map.type != null ? isIncomeType(r[map.type] ?? '') : amt < 0
+    const categoryName = (map.category != null ? r[map.category] : '')?.trim() ?? ''
+    const accountName = (map.account != null ? r[map.account] : '')?.trim() ?? ''
+    const note = (r[map.note] ?? '').trim()
+    const k = key(date, amount, note)
+    const duplicate = existingKeys.has(k) || seen.has(k)
+    seen.add(k)
+    out.push({ date, amount, isIncome, categoryName, accountName, note, duplicate, include: !duplicate })
+  }
+  return out
+}
+
+function key(date: string, amount: number, note: string): string {
+  return `${date}|${amount.toFixed(2)}|${note.toLowerCase()}`
+}
+
+export function distinctValues(cands: TrackerCandidate[], field: 'categoryName' | 'accountName'): string[] {
+  const set = new Set<string>()
+  for (const c of cands) {
+    const v = c[field]
+    if (v) set.add(v)
+  }
+  return [...set].sort()
+}
+
+// Best existing match for a CSV name: exact (case-insensitive), else substring
+// either direction (so "Food" → "Food & Dining", "Bills" → "Bills & Utilities").
+export function suggestMatch(name: string, options: { id: string; name: string }[]): string | null {
+  const n = name.trim().toLowerCase()
+  const exact = options.find((o) => o.name.toLowerCase() === n)
+  if (exact) return exact.id
+  const partial = options.find((o) => o.name.toLowerCase().includes(n) || n.includes(o.name.toLowerCase()))
+  return partial ? partial.id : null
+}
+
+function guessGroup(name: string): CategoryGroup {
+  const n = name.toLowerCase()
+  if (/insurance|rent|loan|subscription|bill|utilit|mortgage|internet|phone|tax/.test(n)) return 'fixed'
+  return 'discretionary'
+}
+function guessIcon(name: string): string {
+  const n = name.toLowerCase()
+  if (/food|dining|eat|restaurant|cafe|coffee/.test(n)) return '🍜'
+  if (/shop/.test(n)) return '🛍️'
+  if (/entertain|movie|game|fun|leisure/.test(n)) return '🎬'
+  if (/electronic|gadget|tech|device/.test(n)) return '📱'
+  if (/transport|grab|petrol|fuel|car|toll|parking/.test(n)) return '🚗'
+  if (/bill|utilit/.test(n)) return '💡'
+  if (/travel|flight|hotel|holiday/.test(n)) return '✈️'
+  if (/health|medic|pharma|doctor|clinic/.test(n)) return '💊'
+  if (/grocer|market/.test(n)) return '🛒'
+  return '🏷️'
+}
+
+const NEW = '__new__'
+export { NEW as CREATE_NEW }
+
+export interface TrackerCommitOptions {
+  candidates: TrackerCandidate[]
+  categoryChoice: Record<string, string> // csv category name -> categoryId | CREATE_NEW
+  accountChoice: Record<string, string> // csv account name -> accountId | CREATE_NEW
+  fallbackCategoryId: string // for rows with a blank category
+  fallbackAccountId: string
+  skipIncome: boolean
+}
+
+const NEW_COLORS = ['#f59e0b', '#84cc16', '#06b6d4', '#a855f7', '#ec4899', '#14b8a6', '#6366f1', '#8b5cf6']
+
+export async function commitTracker(opts: TrackerCommitOptions): Promise<{ imported: number; skippedIncome: number; skippedDup: number }> {
+  const { candidates, categoryChoice, accountChoice, fallbackCategoryId, fallbackAccountId, skipIncome } = opts
+
+  // Only the rows that will actually be written matter for what we create.
+  const willImport = (c: TrackerCandidate) => c.include && !(c.isIncome && skipIncome)
+  const neededCats = new Set(candidates.filter(willImport).map((c) => c.categoryName).filter(Boolean))
+  const neededAccs = new Set(candidates.filter(willImport).map((c) => c.accountName).filter(Boolean))
+
+  // Resolve every needed CSV name to a concrete id, creating new rows where chosen.
+  const catIds = new Map<string, string>()
+  let colorI = 0
+  for (const [name, choice] of Object.entries(categoryChoice)) {
+    if (!neededCats.has(name)) continue
+    if (choice === NEW) {
+      const created = await upsertCategory({
+        name,
+        group: guessGroup(name),
+        icon: guessIcon(name),
+        color: NEW_COLORS[colorI++ % NEW_COLORS.length],
+        monthlyBudget: 0,
+      })
+      catIds.set(name, created.id)
+    } else {
+      catIds.set(name, choice)
+    }
+  }
+  const accIds = new Map<string, string>()
+  for (const [name, choice] of Object.entries(accountChoice)) {
+    if (!neededAccs.has(name)) continue
+    if (choice === NEW) {
+      const created = await upsertAccount({ name, type: 'ewallet', color: NEW_COLORS[colorI++ % NEW_COLORS.length] })
+      accIds.set(name, created.id)
+    } else {
+      accIds.set(name, choice)
+    }
+  }
+
+  let imported = 0
+  let skippedIncome = 0
+  let skippedDup = 0
+  for (const c of candidates) {
+    if (!c.include) { skippedDup++; continue }
+    if (c.isIncome && skipIncome) { skippedIncome++; continue }
+    const categoryId = catIds.get(c.categoryName) ?? fallbackCategoryId
+    const accountId = accIds.get(c.accountName) ?? fallbackAccountId
+    await addTransaction({
+      date: c.date,
+      amount: c.amount,
+      accountId,
+      categoryId,
+      note: c.note,
+      source: 'import',
+      reconciled: true,
+    })
+    imported++
+  }
+  return { imported, skippedIncome, skippedDup }
 }
