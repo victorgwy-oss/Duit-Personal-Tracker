@@ -228,7 +228,7 @@ function SavingsProjection({
           {formatMoneyShort(projected, currency)}
         </div>
         <div className="text-xs text-ink-400">
-          projected savings at your current pace · target {formatMoneyShort(data.savingsTarget, currency)}
+          left after spending &amp; bills · target {formatMoneyShort(data.savingsTarget, currency)}
         </div>
       </div>
       <div className="mt-3 h-2 rounded-full bg-ink-800 overflow-hidden">
@@ -238,7 +238,8 @@ function SavingsProjection({
         />
       </div>
 
-      {/* Full breakdown so the projected figure reconciles line by line. */}
+      {/* Breakdown so the figure reconciles line by line: income minus what
+          you've spent and the bills still due. No run-rate guesswork. */}
       <div className="mt-4 space-y-1.5 text-xs">
         <Line
           label="Income this month"
@@ -252,14 +253,6 @@ function SavingsProjection({
         />
         <Line label="Spent so far" value={-data.totalSpent} currency={currency} />
         <Line label="Bills still due" value={-data.remainingRecurring} currency={currency} />
-        <div className="h-px bg-ink-700/60 my-1.5" />
-        <Line label="Left if you stopped now" value={data.savingsIfStopNow} currency={currency} strong />
-        <Line
-          label="On pace to still spend"
-          value={-data.projectedRemainingVariable}
-          currency={currency}
-          muted
-        />
         <div className="h-px bg-ink-700/60 my-1.5" />
         <Line label="Projected savings" value={projected} currency={currency} strong />
       </div>

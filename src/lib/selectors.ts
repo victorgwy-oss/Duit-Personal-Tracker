@@ -115,8 +115,11 @@ export function computeDashboard(
 
   const projectedTotalSpend = totalSpent + remainingRecurring + projectedRemainingVariable
   const income = cycleIncome
-  const projectedSavings = income - projectedTotalSpend
+  // Projected savings counts only KNOWN commitments — what you've spent plus
+  // bills still due. It deliberately does NOT forecast future everyday spending
+  // from your run-rate, so the figure is a concrete "money left", not a guess.
   const savingsIfStopNow = income - totalSpent - remainingRecurring
+  const projectedSavings = savingsIfStopNow
   const savingsTarget = settings.savingsTarget
 
   // Upcoming that is genuinely in the future (for the "committed" card).
