@@ -223,18 +223,12 @@ function SavingsProjection({
           {onTrack ? 'On track to save' : 'Heading below your target'}
         </span>
       </div>
-      <div className="flex items-end justify-between">
-        <div>
-          <div className="text-2xl font-bold text-ink-100 tabular-nums">
-            {formatMoneyShort(projected, currency)}
-          </div>
-          <div className="text-xs text-ink-400">
-            projected savings · target {formatMoneyShort(data.savingsTarget, currency)}
-          </div>
+      <div className="mb-1">
+        <div className="text-2xl font-bold text-ink-100 tabular-nums">
+          {formatMoneyShort(projected, currency)}
         </div>
-        <div className="text-right text-xs text-ink-500">
-          <div>Spend so far {formatMoney(data.totalSpent, currency)}</div>
-          <div>+ due {formatMoney(data.remainingRecurring, currency)}</div>
+        <div className="text-xs text-ink-400">
+          projected savings at your current pace · target {formatMoneyShort(data.savingsTarget, currency)}
         </div>
       </div>
       <div className="mt-3 h-2 rounded-full bg-ink-800 overflow-hidden">
@@ -243,13 +237,64 @@ function SavingsProjection({
           style={{ width: `${pct * 100}%` }}
         />
       </div>
-      <button
-        onClick={onEditIncome}
-        className="mt-3 w-full flex items-center justify-between text-xs text-ink-400 hover:text-ink-200"
+
+      {/* Full breakdown so the projected figure reconciles line by line. */}
+      <div className="mt-4 space-y-1.5 text-xs">
+        <Line
+          label="Income this month"
+          value={data.income}
+          currency={currency}
+          action={
+            <button onClick={onEditIncome} className="ml-2 text-brand-400 font-medium">
+              Adjust →
+            </button>
+          }
+        />
+        <Line label="Spent so far" value={-data.totalSpent} currency={currency} />
+        <Line label="Bills still due" value={-data.remainingRecurring} currency={currency} />
+        <div className="h-px bg-ink-700/60 my-1.5" />
+        <Line label="Left if you stopped now" value={data.savingsIfStopNow} currency={currency} strong />
+        <Line
+          label="On pace to still spend"
+          value={-data.projectedRemainingVariable}
+          currency={currency}
+          muted
+        />
+        <div className="h-px bg-ink-700/60 my-1.5" />
+        <Line label="Projected savings" value={projected} currency={currency} strong />
+      </div>
+    </div>
+  )
+}
+
+function Line({
+  label,
+  value,
+  currency,
+  strong,
+  muted,
+  action,
+}: {
+  label: string
+  value: number
+  currency: string
+  strong?: boolean
+  muted?: boolean
+  action?: React.ReactNode
+}) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className={`flex items-center ${muted ? 'text-ink-500' : strong ? 'text-ink-200' : 'text-ink-400'}`}>
+        {label}
+        {action}
+      </span>
+      <span
+        className={`tabular-nums ${
+          strong ? 'text-ink-100 font-semibold' : muted ? 'text-ink-500' : 'text-ink-300'
+        }`}
       >
-        <span>Income this month {formatMoney(data.income, currency)}</span>
-        <span className="text-brand-400 font-medium">Adjust →</span>
-      </button>
+        {formatMoney(value, currency)}
+      </span>
     </div>
   )
 }
