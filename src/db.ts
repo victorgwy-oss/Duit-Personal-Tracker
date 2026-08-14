@@ -54,6 +54,8 @@ async function seed() {
   const accounts: Account[] = [
     { id: uid(), name: 'TouchNGo', type: 'ewallet', color: '#3b82f6', updatedAt: t },
     { id: uid(), name: 'Credit Card', type: 'card', color: '#f472b6', updatedAt: t },
+    { id: uid(), name: 'Cash', type: 'cash', color: '#84cc16', updatedAt: t },
+    { id: uid(), name: 'Bank Transfer', type: 'bank', color: '#0ea5e9', updatedAt: t },
   ]
 
   const categories: Category[] = [

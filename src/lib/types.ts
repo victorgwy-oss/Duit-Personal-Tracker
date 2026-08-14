@@ -1,6 +1,17 @@
 // Core domain types. IDs are UUID strings so they map 1:1 onto Supabase later.
 
-export type WalletType = 'ewallet' | 'card'
+export type WalletType = 'ewallet' | 'card' | 'cash' | 'bank'
+
+export const WALLET_TYPES: { value: WalletType; label: string }[] = [
+  { value: 'ewallet', label: 'E-wallet' },
+  { value: 'card', label: 'Credit card' },
+  { value: 'cash', label: 'Cash' },
+  { value: 'bank', label: 'Bank transfer' },
+]
+
+export function walletTypeLabel(t: WalletType): string {
+  return WALLET_TYPES.find((w) => w.value === t)?.label ?? t
+}
 
 export interface Account {
   id: string

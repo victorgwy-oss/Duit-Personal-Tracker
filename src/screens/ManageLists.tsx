@@ -3,7 +3,8 @@ import Sheet from '../components/Sheet'
 import { useAccounts, useCategories } from '../hooks/useData'
 import { upsertAccount, upsertCategory } from '../lib/repo'
 import { db } from '../db'
-import type { Category, CategoryGroup } from '../lib/types'
+import type { Category, CategoryGroup, WalletType } from '../lib/types'
+import { WALLET_TYPES, walletTypeLabel } from '../lib/types'
 
 const EMOJIS = ['🍜', '🛒', '🚗', '🛍️', '👨‍👩‍👧', '✈️', '🛡️', '🔁', '💡', '🏠', '🎬', '💊', '🎁', '☕', '⛽', '📱', '❓']
 const COLORS = ['#f59e0b', '#84cc16', '#06b6d4', '#a855f7', '#ec4899', '#14b8a6', '#6366f1', '#8b5cf6', '#0ea5e9', '#64748b', '#f472b6', '#3b82f6']
@@ -169,7 +170,7 @@ function CategoryEditor({ category, onClose }: { category: Category | null; onCl
 
 function WalletManager({ accounts }: { accounts: ReturnType<typeof useAccounts> }) {
   const [name, setName] = useState('')
-  const [type, setType] = useState<'ewallet' | 'card'>('ewallet')
+  const [type, setType] = useState<WalletType>('ewallet')
   const [color, setColor] = useState(COLORS[2])
 
   async function add() {
@@ -185,7 +186,7 @@ function WalletManager({ accounts }: { accounts: ReturnType<typeof useAccounts> 
           <div key={a.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-ink-800 border border-ink-700">
             <span className="h-3 w-3 rounded-full" style={{ backgroundColor: a.color }} />
             <span className="flex-1 text-sm text-ink-100">{a.name}</span>
-            <span className="text-xs text-ink-500">{a.type === 'card' ? 'Credit card' : 'E-wallet'}</span>
+            <span className="text-xs text-ink-500">{walletTypeLabel(a.type)}</span>
           </div>
         ))}
       </div>
@@ -198,13 +199,13 @@ function WalletManager({ accounts }: { accounts: ReturnType<typeof useAccounts> 
           className="w-full bg-ink-800 border border-ink-700 rounded-xl px-3 py-2.5 text-ink-100 focus:outline-none focus:border-brand-500"
         />
         <div className="grid grid-cols-2 gap-2">
-          {(['ewallet', 'card'] as const).map((t) => (
+          {WALLET_TYPES.map((t) => (
             <button
-              key={t}
-              onClick={() => setType(t)}
-              className={`py-2 rounded-lg text-sm ${type === t ? 'bg-brand-500 text-ink-950' : 'bg-ink-800 text-ink-300'}`}
+              key={t.value}
+              onClick={() => setType(t.value)}
+              className={`py-2 rounded-lg text-sm ${type === t.value ? 'bg-brand-500 text-ink-950' : 'bg-ink-800 text-ink-300'}`}
             >
-              {t === 'card' ? 'Credit card' : 'E-wallet'}
+              {t.label}
             </button>
           ))}
         </div>
