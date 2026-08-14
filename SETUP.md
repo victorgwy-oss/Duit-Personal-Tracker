@@ -47,7 +47,9 @@ You'll create three free accounts. Give me the values in **bold** and I'll wire 
 3. **Settings → Environment variables** add:
    - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (from step 1) — *build variables*
    - `GEMINI_API_KEY` (from step 2) — used by the `/api/scan-receipt` function
-   - optional `GEMINI_MODEL` (defaults to `gemini-2.0-flash`)
+   - optional `GEMINI_MODEL` to force a specific model. If unset, the scanner
+     tries current models (`gemini-2.5-flash` first) and auto-falls-back —
+     including asking Google which models exist — so a retired model self-heals.
 4. Deploy. Open the `*.pages.dev` URL on your phone → **Add to Home Screen** to install.
 
 ### Local dev for the scan function
