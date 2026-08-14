@@ -115,3 +115,27 @@ export function ensureIncomeSeeded() {
   if (!incomeSeedPromise) incomeSeedPromise = seedIncome()
   return incomeSeedPromise
 }
+
+// Erase every local table so a different account can adopt this device without
+// inheriting the previous person's cached data. The seed guards are reset too,
+// so a fresh (dataless) account re-seeds its defaults. Remote data is untouched
+// — each account's rows live safely behind row-level security in Supabase.
+export async function wipeLocalData() {
+  await db.transaction(
+    'rw',
+    [db.accounts, db.categories, db.transactions, db.recurring, db.settings, db.incomeSources, db.incomeOverrides],
+    async () => {
+      await Promise.all([
+        db.accounts.clear(),
+        db.categories.clear(),
+        db.transactions.clear(),
+        db.recurring.clear(),
+        db.settings.clear(),
+        db.incomeSources.clear(),
+        db.incomeOverrides.clear(),
+      ])
+    },
+  )
+  seedPromise = null
+  incomeSeedPromise = null
+}

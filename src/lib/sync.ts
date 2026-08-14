@@ -1,4 +1,4 @@
-import { db, ensureSeeded } from '../db'
+import { db, ensureSeeded, wipeLocalData } from '../db'
 import { supabase } from './supabase'
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isOnlineMode } from './config'
 
@@ -115,13 +115,34 @@ export function onSyncState(cb: Listener): () => void { listeners.add(cb); retur
 function emit() { listeners.forEach((l) => l()) }
 
 let userId: string | null = null
+let bootstrapped = false
+const LAST_USER_KEY = 'duit_last_user'
+
 export function setUser(id: string | null) {
+  // When the signed-in account changes, allow bootstrap to run again so the new
+  // user re-adopts from the cloud (and, if different, wipes the old local cache).
+  if (id !== userId) bootstrapped = false
   userId = id
   syncState.authed = !!id
   emit()
 }
 export function getUserId(): string | null {
   return userId
+}
+
+// If a different account is taking over this device (e.g. a shared phone, or a
+// hand-me-down), clear the previous person's local cache and sync cursors so no
+// data bleeds across accounts. Remote data is untouched — RLS keeps each
+// account's rows private in Supabase. No-op on a normal same-account launch.
+async function adoptUser(id: string): Promise<void> {
+  const last = localStorage.getItem(LAST_USER_KEY)
+  if (last && last !== id) {
+    await wipeLocalData()
+    localStorage.removeItem(QUEUE_KEY)
+    localStorage.removeItem(WATERMARK_KEY)
+    for (const table of TABLE_ORDER) localStorage.removeItem(WATERMARK_PREFIX + table)
+  }
+  localStorage.setItem(LAST_USER_KEY, id)
 }
 
 // --- Flush queued writes to Supabase ---
@@ -208,13 +229,13 @@ async function pushAllLocal(): Promise<void> {
 }
 
 // --- Bootstrap on login: decide seed vs adopt-remote, then sync ---
-let bootstrapped = false
 export async function bootstrap(): Promise<void> {
   if (!supabase || !userId || bootstrapped) return
   bootstrapped = true
   syncState.syncing = true
   emit()
   try {
+    await adoptUser(userId)  // clear a previous account's local cache if switching
     await pull() // fetch anything already in the cloud first
     const remoteHasData = (await db.accounts.count()) > 0
     if (!remoteHasData) {
