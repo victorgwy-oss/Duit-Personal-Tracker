@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Sheet from '../components/Sheet'
 import { useAccounts, useCategories } from '../hooks/useData'
 import { deleteTransaction, updateTransaction } from '../lib/repo'
+import { getReceiptUrl } from '../lib/receipts'
 import { todayISO } from '../lib/format'
 import { TrashIcon } from '../components/icons'
 import type { Transaction } from '../lib/types'
@@ -14,6 +15,7 @@ export default function EditTransaction({ txn, onClose }: { txn: Transaction | n
   const [categoryId, setCategoryId] = useState('')
   const [note, setNote] = useState('')
   const [date, setDate] = useState(todayISO())
+  const [receiptUrl, setReceiptUrl] = useState<string | null>(null)
 
   useEffect(() => {
     if (!txn) return
@@ -22,6 +24,8 @@ export default function EditTransaction({ txn, onClose }: { txn: Transaction | n
     setCategoryId(txn.categoryId)
     setNote(txn.note)
     setDate(txn.date)
+    setReceiptUrl(null)
+    if (txn.receiptPath) getReceiptUrl(txn.receiptPath).then(setReceiptUrl)
   }, [txn])
 
   if (!txn) return null
@@ -105,6 +109,19 @@ export default function EditTransaction({ txn, onClose }: { txn: Transaction | n
             className="w-full bg-ink-800 border border-ink-700 rounded-xl px-3 py-2.5 text-sm text-ink-100 focus:outline-none focus:border-brand-500"
           />
         </Field>
+
+        {txn.receiptPath && (
+          <Field label="Receipt">
+            {receiptUrl ? (
+              <a href={receiptUrl} target="_blank" rel="noreferrer" className="block">
+                <img src={receiptUrl} alt="Receipt" className="max-h-56 rounded-xl border border-ink-700" />
+                <span className="text-xs text-brand-400 mt-1 inline-block">Tap to view full size</span>
+              </a>
+            ) : (
+              <div className="text-xs text-ink-500">Loading receipt…</div>
+            )}
+          </Field>
+        )}
 
         <div className="flex gap-2 pt-2">
           <button

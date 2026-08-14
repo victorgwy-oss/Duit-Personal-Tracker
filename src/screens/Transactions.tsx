@@ -81,6 +81,7 @@ export default function TransactionsScreen() {
                         {cat?.name}
                         {t.source === 'recurring' && <span className="text-brand-400">· auto</span>}
                         {t.source === 'import' && <span className="text-ink-400">· imported</span>}
+                        {t.receiptPath && <span title="Has receipt">· 📎</span>}
                       </div>
                     </div>
                     <span className={`text-sm font-medium tabular-nums ${t.amount < 0 ? 'text-good' : 'text-ink-100'}`}>

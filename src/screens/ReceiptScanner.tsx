@@ -1,8 +1,10 @@
 import { useRef, useState } from 'react'
 import Sheet from '../components/Sheet'
-import { fileToBase64, scanReceipt, ScanUnavailableError, type ScanResult } from '../lib/scan'
+import { scanReceipt, ScanUnavailableError, type ScanResult } from '../lib/scan'
 import { useAccounts, useCategories } from '../hooks/useData'
-import { addTransaction } from '../lib/repo'
+import { addTransaction, updateTransaction } from '../lib/repo'
+import { compressImage, blobToBase64 } from '../lib/image'
+import { saveReceiptImage } from '../lib/receipts'
 import { todayISO } from '../lib/format'
 import { CameraIcon, UploadIcon, CheckIcon } from '../components/icons'
 
@@ -18,6 +20,8 @@ export default function ReceiptScanner({ open, onClose }: { open: boolean; onClo
   const [preview, setPreview] = useState<string>('')
   const [error, setError] = useState('')
   const [result, setResult] = useState<ScanResult | null>(null)
+  const [imageBlob, setImageBlob] = useState<Blob | null>(null)
+  const [saving, setSaving] = useState(false)
 
   // Editable review fields
   const [vendor, setVendor] = useState('')
@@ -31,6 +35,8 @@ export default function ReceiptScanner({ open, onClose }: { open: boolean; onClo
     setPreview('')
     setError('')
     setResult(null)
+    setImageBlob(null)
+    setSaving(false)
   }
 
   function close() {
@@ -42,10 +48,13 @@ export default function ReceiptScanner({ open, onClose }: { open: boolean; onClo
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
-    setPreview(URL.createObjectURL(file))
     setStage('scanning')
     try {
-      const { base64, mimeType } = await fileToBase64(file)
+      // Shrink once, then reuse the small image for both the AI scan and storage.
+      const blob = await compressImage(file)
+      setImageBlob(blob)
+      setPreview(URL.createObjectURL(blob))
+      const { base64, mimeType } = await blobToBase64(blob)
       const res = await scanReceipt(base64, mimeType)
       setResult(res)
       setVendor(res.vendor ?? '')
@@ -69,16 +78,31 @@ export default function ReceiptScanner({ open, onClose }: { open: boolean; onClo
 
   async function saveFromScan() {
     const value = parseFloat(amount || '0')
-    if (!(value > 0) || !accountId || !categoryId) return
-    await addTransaction({
-      date,
-      amount: value,
-      accountId,
-      categoryId,
-      note: vendor.trim(),
-      source: 'manual',
-    })
-    close()
+    if (!(value > 0) || !accountId || !categoryId || saving) return
+    setSaving(true)
+    try {
+      const txn = await addTransaction({
+        date,
+        amount: value,
+        accountId,
+        categoryId,
+        note: vendor.trim(),
+        source: 'manual',
+      })
+      // Attach the receipt image. If storage/migration isn't ready, keep the
+      // transaction anyway — the photo is a bonus, not a blocker.
+      if (imageBlob) {
+        try {
+          const path = await saveReceiptImage(txn.id, imageBlob)
+          await updateTransaction(txn.id, { receiptPath: path })
+        } catch (err) {
+          console.warn('receipt image not saved', err)
+        }
+      }
+      close()
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -197,9 +221,10 @@ export default function ReceiptScanner({ open, onClose }: { open: boolean; onClo
 
           <button
             onClick={saveFromScan}
-            className="w-full py-3.5 rounded-xl bg-brand-500 text-ink-950 font-semibold flex items-center justify-center gap-2"
+            disabled={saving}
+            className="w-full py-3.5 rounded-xl bg-brand-500 text-ink-950 font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
           >
-            <CheckIcon width={20} height={20} /> Save expense
+            <CheckIcon width={20} height={20} /> {saving ? 'Saving…' : 'Save expense'}
           </button>
         </div>
       )}

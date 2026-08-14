@@ -46,6 +46,7 @@ export interface Transaction {
   note: string
   source: TxnSource
   recurringId?: string
+  receiptPath?: string // storage path or data: URL of an attached receipt image
   reconciled: boolean // true once matched to a statement import
   createdAt: number
   updatedAt: number

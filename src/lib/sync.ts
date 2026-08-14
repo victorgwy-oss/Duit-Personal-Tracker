@@ -32,8 +32,14 @@ const TABLES: Record<SyncTable, TableConfig> = {
   transactions: {
     remote: 'transactions',
     dexie: () => db.transactions,
-    toRemote: (r, uid) => ({ id: r.id, user_id: uid, date: r.date, amount: r.amount, account_id: r.accountId, category_id: r.categoryId, note: r.note, source: r.source, recurring_id: r.recurringId ?? null, reconciled: !!r.reconciled, created_at: r.createdAt, updated_at: r.updatedAt, deleted: !!r.deleted }),
-    fromRemote: (x) => ({ id: x.id, date: x.date, amount: Number(x.amount), accountId: x.account_id, categoryId: x.category_id, note: x.note ?? '', source: x.source, recurringId: x.recurring_id ?? undefined, reconciled: !!x.reconciled, createdAt: num(x.created_at), updatedAt: num(x.updated_at), deleted: !!x.deleted }),
+    toRemote: (r, uid) => {
+      const row: any = { id: r.id, user_id: uid, date: r.date, amount: r.amount, account_id: r.accountId, category_id: r.categoryId, note: r.note, source: r.source, recurring_id: r.recurringId ?? null, reconciled: !!r.reconciled, created_at: r.createdAt, updated_at: r.updatedAt, deleted: !!r.deleted }
+      // Only send receipt_path when set, so sync keeps working before the
+      // 0002 migration adds the column.
+      if (r.receiptPath) row.receipt_path = r.receiptPath
+      return row
+    },
+    fromRemote: (x) => ({ id: x.id, date: x.date, amount: Number(x.amount), accountId: x.account_id, categoryId: x.category_id, note: x.note ?? '', source: x.source, recurringId: x.recurring_id ?? undefined, receiptPath: x.receipt_path ?? undefined, reconciled: !!x.reconciled, createdAt: num(x.created_at), updatedAt: num(x.updated_at), deleted: !!x.deleted }),
   },
   recurring: {
     remote: 'recurring_rules',
@@ -87,6 +93,9 @@ export function setUser(id: string | null) {
   userId = id
   syncState.authed = !!id
   emit()
+}
+export function getUserId(): string | null {
+  return userId
 }
 
 // --- Flush queued writes to Supabase ---
