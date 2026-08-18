@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAllTransactions, useLookups, useSettings } from '../hooks/useData'
-import { formatMoney, formatDayLabel, todayISO } from '../lib/format'
+import { formatMoney, formatDayLabel, formatTime, todayISO } from '../lib/format'
 import type { Account, Category, Transaction } from '../lib/types'
 import { CloseIcon, ChevronLeft, ChevronRight } from '../components/icons'
 import EditTransaction from './EditTransaction'
@@ -144,9 +144,12 @@ function TxnRow({
           {t.receiptPath && <span title="Has receipt">· 📎</span>}
         </div>
       </div>
-      <span className={`text-sm font-medium tabular-nums ${t.amount < 0 ? 'text-good' : 'text-ink-100'}`}>
-        {formatMoney(t.amount, currency)}
-      </span>
+      <div className="text-right shrink-0">
+        <div className={`text-sm font-medium tabular-nums ${t.amount < 0 ? 'text-good' : 'text-ink-100'}`}>
+          {formatMoney(t.amount, currency)}
+        </div>
+        {t.createdAt ? <div className="text-[11px] text-ink-500 tabular-nums">{formatTime(t.createdAt)}</div> : null}
+      </div>
     </button>
   )
 }
@@ -197,15 +200,16 @@ function CalendarView({
   )
   const selectedTotal = dayTxns.reduce((a, b) => a + b.amount, 0)
 
-  const firstDow = new Date(year, month, 1).getDay()
+  // Week starts Monday: shift Sun(0)..Sat(6) so Monday is the first column.
+  const lead = (new Date(year, month, 1).getDay() + 6) % 7
   const daysInMonth = new Date(year, month + 1, 0).getDate()
   const cells: (number | null)[] = []
-  for (let i = 0; i < firstDow; i++) cells.push(null)
+  for (let i = 0; i < lead; i++) cells.push(null)
   for (let d = 1; d <= daysInMonth; d++) cells.push(d)
   while (cells.length % 7 !== 0) cells.push(null)
 
   const today = todayISO()
-  const WEEK = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+  const WEEK = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 
   // Move month and keep the selected day inside the visible month, so the
   // highlight and the day-detail below always agree.

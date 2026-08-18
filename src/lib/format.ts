@@ -58,3 +58,14 @@ export function formatShortDate(iso: string): string {
   const d = fromISO(iso)
   return `${d.getDate()} ${MONTH_LABELS[d.getMonth()]}`
 }
+
+// Clock time an entry was recorded, from its createdAt ms timestamp, e.g.
+// "2:45 PM". Returns '' for missing/zero timestamps.
+export function formatTime(ms: number): string {
+  if (!ms) return ''
+  return new Date(ms).toLocaleTimeString('en-MY', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  })
+}
