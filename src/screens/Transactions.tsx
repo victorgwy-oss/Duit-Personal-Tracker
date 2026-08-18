@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAllTransactions, useLookups, useSettings } from '../hooks/useData'
-import { formatMoney, formatDayLabel } from '../lib/format'
+import { formatMoney, formatDayLabel, todayISO } from '../lib/format'
 import type { Account, Category, Transaction } from '../lib/types'
-import { CloseIcon } from '../components/icons'
+import { CloseIcon, ChevronLeft, ChevronRight } from '../components/icons'
 import EditTransaction from './EditTransaction'
 
 export default function TransactionsScreen() {
@@ -11,6 +11,7 @@ export default function TransactionsScreen() {
   const { accounts, categories, accountMap, categoryMap } = useLookups()
   const [editing, setEditing] = useState<Transaction | null>(null)
   const [filter, setFilter] = useState('')
+  const [view, setView] = useState<'list' | 'calendar'>('list')
 
   const grouped = useMemo(() => {
     const list = (txns ?? [])
@@ -39,68 +40,282 @@ export default function TransactionsScreen() {
   return (
     <div className="px-5 pt-6 safe-top">
       <h1 className="text-2xl font-bold text-ink-100 mb-4">Activity</h1>
-      <SearchBox
-        value={filter}
-        onChange={setFilter}
-        categories={categories}
-        accounts={accounts}
-        txns={txns}
-      />
 
-      {grouped.length === 0 && (
-        <div className="text-center text-ink-500 py-16">
-          <p className="text-4xl mb-3">🧾</p>
-          <p>No expenses yet.</p>
-          <p className="text-sm mt-1">Tap the + button to log your first one.</p>
-        </div>
-      )}
-
-      <div className="space-y-6">
-        {grouped.map((g) => (
-          <div key={g.date}>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-ink-400">{formatDayLabel(g.date)}</span>
-              <span className="text-xs text-ink-500 tabular-nums">{formatMoney(g.total, currency)}</span>
-            </div>
-            <div className="space-y-1">
-              {g.items.map((t) => {
-                const cat = categoryMap.get(t.categoryId)
-                const acc = accountMap.get(t.accountId)
-                return (
-                  <button
-                    key={t.id}
-                    onClick={() => setEditing(t)}
-                    className="w-full flex items-center gap-3 py-2.5 px-2 rounded-xl hover:bg-ink-800/60 transition text-left"
-                  >
-                    <span className="h-9 w-9 rounded-full bg-ink-800 flex items-center justify-center text-lg shrink-0">
-                      {cat?.icon ?? '❓'}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm text-ink-100 truncate">
-                        {t.note || cat?.name || 'Expense'}
-                      </div>
-                      <div className="text-xs text-ink-500 flex items-center gap-1.5">
-                        {acc && <span className="h-2 w-2 rounded-full" style={{ backgroundColor: acc.color }} />}
-                        {cat?.name}
-                        {t.source === 'recurring' && <span className="text-brand-400">· auto</span>}
-                        {t.source === 'import' && <span className="text-ink-400">· imported</span>}
-                        {t.receiptPath && <span title="Has receipt">· 📎</span>}
-                      </div>
-                    </div>
-                    <span className={`text-sm font-medium tabular-nums ${t.amount < 0 ? 'text-good' : 'text-ink-100'}`}>
-                      {formatMoney(t.amount, currency)}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
+      <div className="flex gap-2 mb-4">
+        {(['list', 'calendar'] as const).map((v) => (
+          <button
+            key={v}
+            onClick={() => setView(v)}
+            className={`flex-1 py-2 rounded-lg text-sm capitalize ${
+              view === v ? 'bg-brand-500 text-ink-950 font-medium' : 'bg-ink-800 text-ink-300'
+            }`}
+          >
+            {v}
+          </button>
         ))}
       </div>
+
+      {view === 'list' ? (
+        <>
+          <SearchBox
+            value={filter}
+            onChange={setFilter}
+            categories={categories}
+            accounts={accounts}
+            txns={txns}
+          />
+
+          {grouped.length === 0 && (
+            <div className="text-center text-ink-500 py-16">
+              <p className="text-4xl mb-3">🧾</p>
+              <p>No expenses yet.</p>
+              <p className="text-sm mt-1">Tap the + button to log your first one.</p>
+            </div>
+          )}
+
+          <div className="space-y-6">
+            {grouped.map((g) => (
+              <div key={g.date}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-ink-400">{formatDayLabel(g.date)}</span>
+                  <span className="text-xs text-ink-500 tabular-nums">{formatMoney(g.total, currency)}</span>
+                </div>
+                <div className="space-y-1">
+                  {g.items.map((t) => (
+                    <TxnRow
+                      key={t.id}
+                      t={t}
+                      categoryMap={categoryMap}
+                      accountMap={accountMap}
+                      currency={currency}
+                      onClick={() => setEditing(t)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <CalendarView
+          txns={txns}
+          categoryMap={categoryMap}
+          accountMap={accountMap}
+          currency={currency}
+          onEdit={setEditing}
+        />
+      )}
 
       <EditTransaction txn={editing} onClose={() => setEditing(null)} />
     </div>
   )
+}
+
+function TxnRow({
+  t,
+  categoryMap,
+  accountMap,
+  currency,
+  onClick,
+}: {
+  t: Transaction
+  categoryMap: Map<string, Category>
+  accountMap: Map<string, Account>
+  currency: string
+  onClick: () => void
+}) {
+  const cat = categoryMap.get(t.categoryId)
+  const acc = accountMap.get(t.accountId)
+  return (
+    <button
+      onClick={onClick}
+      className="w-full flex items-center gap-3 py-2.5 px-2 rounded-xl hover:bg-ink-800/60 transition text-left"
+    >
+      <span className="h-9 w-9 rounded-full bg-ink-800 flex items-center justify-center text-lg shrink-0">
+        {cat?.icon ?? '❓'}
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm text-ink-100 truncate">{t.note || cat?.name || 'Expense'}</div>
+        <div className="text-xs text-ink-500 flex items-center gap-1.5">
+          {acc && <span className="h-2 w-2 rounded-full" style={{ backgroundColor: acc.color }} />}
+          {cat?.name}
+          {t.source === 'recurring' && <span className="text-brand-400">· auto</span>}
+          {t.source === 'import' && <span className="text-ink-400">· imported</span>}
+          {t.receiptPath && <span title="Has receipt">· 📎</span>}
+        </div>
+      </div>
+      <span className={`text-sm font-medium tabular-nums ${t.amount < 0 ? 'text-good' : 'text-ink-100'}`}>
+        {formatMoney(t.amount, currency)}
+      </span>
+    </button>
+  )
+}
+
+// Month calendar with each day's net spend; tap a day to see its activity.
+function CalendarView({
+  txns,
+  categoryMap,
+  accountMap,
+  currency,
+  onEdit,
+}: {
+  txns: Transaction[] | undefined
+  categoryMap: Map<string, Category>
+  accountMap: Map<string, Account>
+  currency: string
+  onEdit: (t: Transaction) => void
+}) {
+  const [ref, setRef] = useState(() => {
+    const d = new Date()
+    return new Date(d.getFullYear(), d.getMonth(), 1)
+  })
+  const [selected, setSelected] = useState<string>(todayISO())
+
+  const year = ref.getFullYear()
+  const month = ref.getMonth()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const iso = (d: number) => `${year}-${pad(month + 1)}-${pad(d)}`
+
+  const active = useMemo(() => (txns ?? []).filter((t) => !t.deleted), [txns])
+
+  const dayTotals = useMemo(() => {
+    const prefix = `${year}-${pad(month + 1)}-`
+    const m = new Map<string, number>()
+    for (const t of active) if (t.date.startsWith(prefix)) m.set(t.date, (m.get(t.date) ?? 0) + t.amount)
+    return m
+  }, [active, year, month])
+
+  const monthTotal = useMemo(() => {
+    let s = 0
+    for (const v of dayTotals.values()) s += v
+    return s
+  }, [dayTotals])
+
+  const dayTxns = useMemo(
+    () => active.filter((t) => t.date === selected).sort((a, b) => b.createdAt - a.createdAt),
+    [active, selected],
+  )
+  const selectedTotal = dayTxns.reduce((a, b) => a + b.amount, 0)
+
+  const firstDow = new Date(year, month, 1).getDay()
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const cells: (number | null)[] = []
+  for (let i = 0; i < firstDow; i++) cells.push(null)
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d)
+  while (cells.length % 7 !== 0) cells.push(null)
+
+  const today = todayISO()
+  const WEEK = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+
+  // Move month and keep the selected day inside the visible month, so the
+  // highlight and the day-detail below always agree.
+  function goMonth(delta: number) {
+    const nr = new Date(year, month + delta, 1)
+    const now = new Date()
+    const inThisMonth = now.getFullYear() === nr.getFullYear() && now.getMonth() === nr.getMonth()
+    setRef(nr)
+    setSelected(inThisMonth ? todayISO() : `${nr.getFullYear()}-${pad(nr.getMonth() + 1)}-01`)
+  }
+
+  return (
+    <div className="pb-24">
+      {/* Month switcher */}
+      <div className="flex items-center justify-between mb-3">
+        <button onClick={() => goMonth(-1)} className="p-2 text-ink-400 hover:text-ink-100">
+          <ChevronLeft width={20} height={20} />
+        </button>
+        <div className="text-center">
+          <div className="text-sm font-medium text-ink-200">
+            {ref.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+          </div>
+          <div className="text-xs text-ink-500 tabular-nums">{formatMoney(monthTotal, currency)} spent</div>
+        </div>
+        <button onClick={() => goMonth(1)} className="p-2 text-ink-400 hover:text-ink-100">
+          <ChevronRight width={20} height={20} />
+        </button>
+      </div>
+
+      {/* Weekday header */}
+      <div className="grid grid-cols-7 gap-1 mb-1">
+        {WEEK.map((w, i) => (
+          <div key={i} className="text-center text-[10px] text-ink-500">
+            {w}
+          </div>
+        ))}
+      </div>
+
+      {/* Day grid */}
+      <div className="grid grid-cols-7 gap-1">
+        {cells.map((d, i) => {
+          if (d == null) return <div key={i} />
+          const dISO = iso(d)
+          const total = dayTotals.get(dISO)
+          const isSelected = dISO === selected
+          const isToday = dISO === today
+          return (
+            <button
+              key={i}
+              onClick={() => setSelected(dISO)}
+              className={`min-h-[2.9rem] rounded-lg p-1 flex flex-col justify-between transition ${
+                isSelected
+                  ? 'bg-brand-500/20 ring-1 ring-brand-500'
+                  : total != null
+                    ? 'bg-ink-800/70'
+                    : 'bg-ink-800/25'
+              }`}
+            >
+              <span className={`text-[10px] self-start ${isToday ? 'text-brand-400 font-bold' : 'text-ink-400'}`}>
+                {d}
+              </span>
+              {total != null ? (
+                <span
+                  className={`text-xs tabular-nums font-medium leading-none self-end ${
+                    total < 0 ? 'text-good' : 'text-ink-100'
+                  }`}
+                >
+                  {cellAmount(total)}
+                </span>
+              ) : (
+                <span className="self-end text-ink-700 leading-none">·</span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Selected day's activity */}
+      <div className="mt-5">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm font-medium text-ink-200">{formatDayLabel(selected)}</span>
+          <span className="text-xs text-ink-500 tabular-nums">{formatMoney(selectedTotal, currency)}</span>
+        </div>
+        {dayTxns.length === 0 ? (
+          <p className="text-sm text-ink-500 py-6 text-center">No activity on this day.</p>
+        ) : (
+          <div className="space-y-1">
+            {dayTxns.map((t) => (
+              <TxnRow
+                key={t.id}
+                t={t}
+                categoryMap={categoryMap}
+                accountMap={accountMap}
+                currency={currency}
+                onClick={() => onEdit(t)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Compact day-cell amount, e.g. 53, 1.2k, 12k (no currency symbol to fit).
+function cellAmount(n: number): string {
+  const a = Math.abs(n)
+  const sign = n < 0 ? '-' : ''
+  if (a >= 1000) return `${sign}${(a / 1000).toFixed(a >= 10000 ? 0 : 1)}k`
+  return `${sign}${Math.round(a)}`
 }
 
 type Suggestion =
