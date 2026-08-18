@@ -193,7 +193,8 @@ function CategoryPicker({
 }
 
 function NumberPad({ onPress }: { onPress: (key: string) => void }) {
-  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', 'del']
+  // Bottom row: 0 on the left, decimal point in the middle, delete on the right.
+  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '.', 'del']
   return (
     <div className="grid grid-cols-3 gap-2">
       {keys.map((k) => (
