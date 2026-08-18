@@ -5,6 +5,7 @@ import { exportBackup, importBackup } from '../lib/backup'
 import { isOnlineMode, syncNow } from '../lib/sync'
 import { signOut } from '../lib/supabase'
 import { UploadIcon, DownloadIcon } from '../components/icons'
+import AmountField from '../components/AmountField'
 import ManageLists from './ManageLists'
 import ImportStatement from './ImportStatement'
 import IncomeSheet from '../components/IncomeSheet'
@@ -72,7 +73,16 @@ export default function SettingsScreen() {
           <span className="text-sm text-brand-400">Manage →</span>
         </button>
         <Row label="Savings target">
-          <MoneyInput value={target} onChange={setTarget} onBlur={() => persist({ savingsTarget: parseFloat(target || '0') })} />
+          <AmountField
+            value={parseFloat(target || '0')}
+            onChange={(n) => {
+              setTarget(String(n))
+              persist({ savingsTarget: n })
+            }}
+            compact
+            className="w-28"
+            title="Savings target"
+          />
         </Row>
         <Row label="Cycle starts on">
           <select
@@ -181,18 +191,3 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   )
 }
 
-function MoneyInput({ value, onChange, onBlur }: { value: string; onChange: (v: string) => void; onBlur: () => void }) {
-  return (
-    <div className="flex items-center gap-1">
-      <span className="text-ink-500 text-sm">RM</span>
-      <input
-        type="number"
-        inputMode="decimal"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onBlur={onBlur}
-        className="w-24 bg-ink-900 border border-ink-700 rounded-lg px-2 py-1.5 text-right text-ink-100 text-sm focus:outline-none focus:border-brand-500"
-      />
-    </div>
-  )
-}

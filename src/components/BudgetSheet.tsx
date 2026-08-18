@@ -1,4 +1,5 @@
 import Sheet from './Sheet'
+import AmountField from './AmountField'
 import { useCategories, useSettings } from '../hooks/useData'
 import { upsertCategory } from '../lib/repo'
 import type { Category } from '../lib/types'
@@ -20,8 +21,7 @@ export default function BudgetSheet({ open, onClose }: { open: boolean; onClose:
 
   const total = list.reduce((sum, c) => sum + (c.monthlyBudget || 0), 0)
 
-  async function setBudget(cat: Category, value: string) {
-    const num = parseFloat(value || '0')
+  async function setBudget(cat: Category, num: number) {
     if (Number.isNaN(num) || num === cat.monthlyBudget) return
     await upsertCategory({
       id: cat.id,
@@ -55,18 +55,15 @@ export default function BudgetSheet({ open, onClose }: { open: boolean; onClose:
               <div className="text-sm text-ink-100 truncate">{c.name}</div>
               <div className="text-xs text-ink-500 capitalize">{c.group}</div>
             </div>
-            <div className="flex items-center bg-ink-900 border border-ink-700 rounded-lg px-2.5 py-1.5 w-28">
-              <span className="text-ink-500 text-xs mr-1">{currency}</span>
-              <input
-                type="number"
-                inputMode="decimal"
-                defaultValue={c.monthlyBudget || ''}
-                key={`${c.id}:${c.monthlyBudget}`}
-                placeholder="0"
-                onBlur={(e) => setBudget(c, e.target.value)}
-                className="flex-1 min-w-0 bg-transparent text-right text-ink-100 text-sm focus:outline-none tabular-nums"
-              />
-            </div>
+            <AmountField
+              value={c.monthlyBudget}
+              onChange={(n) => setBudget(c, n)}
+              currency={currency}
+              compact
+              placeholder="0"
+              title={`Budget · ${c.name}`}
+              className="w-28"
+            />
           </div>
         ))}
       </div>

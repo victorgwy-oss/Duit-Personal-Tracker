@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import Sheet from '../components/Sheet'
+import AmountField from '../components/AmountField'
 import { useAccounts, useCategories } from '../hooks/useData'
 import { upsertAccount, upsertCategory } from '../lib/repo'
 import { db } from '../db'
@@ -116,15 +117,11 @@ function CategoryEditor({ category, onClose }: { category: Category | null; onCl
         </div>
         <div>
           <div className="text-xs text-ink-400 mb-1.5">Monthly budget (0 = none)</div>
-          <div className="flex items-center bg-ink-800 border border-ink-700 rounded-xl px-3 py-2.5">
-            <span className="text-ink-500 mr-2">RM</span>
-            <input
-              type="number"
-              value={budget}
-              onChange={(e) => setBudget(e.target.value)}
-              className="flex-1 bg-transparent text-ink-100 focus:outline-none"
-            />
-          </div>
+          <AmountField
+            value={budget === '' ? 0 : parseFloat(budget)}
+            onChange={(n) => setBudget(String(n))}
+            title="Monthly budget"
+          />
         </div>
         <div>
           <div className="text-xs text-ink-400 mb-1.5">Icon</div>

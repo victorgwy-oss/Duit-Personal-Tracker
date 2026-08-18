@@ -6,6 +6,7 @@ import { cadenceLabel, monthlyEquivalent, monthlyCommitment } from '../lib/recur
 import { formatMoney, formatShortDate, todayISO } from '../lib/format'
 import { uid } from '../db'
 import Sheet from '../components/Sheet'
+import AmountField from '../components/AmountField'
 import { CheckIcon, CloseIcon } from '../components/icons'
 import type { Cadence, RecurringMode, RecurringRule } from '../lib/types'
 
@@ -188,17 +189,12 @@ function RuleEditor({ rule, onClose }: { rule: RecurringRule | null; onClose: ()
           placeholder="Name (e.g. Netflix, Car insurance)"
           className="w-full bg-ink-800 border border-ink-700 rounded-xl px-3 py-2.5 text-ink-100 focus:outline-none focus:border-brand-500"
         />
-        <div className="flex items-center bg-ink-800 border border-ink-700 rounded-xl px-3 py-2.5">
-          <span className="text-ink-500 mr-2">RM</span>
-          <input
-            type="number"
-            inputMode="decimal"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="0.00"
-            className="flex-1 bg-transparent text-lg font-semibold text-ink-100 focus:outline-none"
-          />
-        </div>
+        <AmountField
+          value={amount === '' ? 0 : parseFloat(amount)}
+          onChange={(n) => setAmount(String(n))}
+          title="Charge amount"
+          big
+        />
 
         <Labeled label="Wallet">
           <div className="grid grid-cols-2 gap-2">

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { saveSettings } from '../lib/repo'
 import { formatMoney } from '../lib/format'
+import AmountField from '../components/AmountField'
 
 // One-time setup so the dashboard can compute projected savings from day one.
 export default function Onboarding() {
@@ -32,7 +33,12 @@ export default function Onboarding() {
           title="What's your monthly take-home income?"
           hint="Used to project how much you'll actually save this month. You can change it later."
         >
-          <MoneyField value={income} onChange={setIncome} placeholder="0.00" autoFocus />
+          <AmountField
+            value={income === '' ? 0 : parseFloat(income)}
+            onChange={(n) => setIncome(String(n))}
+            title="Monthly income"
+            big
+          />
           <NextButton onClick={() => setStep(1)} label="Continue" />
         </Panel>
       )}
@@ -55,7 +61,12 @@ export default function Onboarding() {
               </button>
             ))}
           </div>
-          <MoneyField value={target} onChange={setTarget} placeholder="Custom amount" />
+          <AmountField
+            value={target === '' ? 0 : parseFloat(target)}
+            onChange={(n) => setTarget(String(n))}
+            title="Savings target"
+            big
+          />
           <div className="flex gap-2 mt-2">
             <BackButton onClick={() => setStep(0)} />
             <NextButton onClick={() => setStep(2)} label="Continue" />
@@ -109,33 +120,6 @@ function Panel({ title, hint, children }: { title: string; hint: string; childre
       <h1 className="text-xl font-semibold text-ink-100 mb-1">{title}</h1>
       <p className="text-sm text-ink-400 mb-5">{hint}</p>
       {children}
-    </div>
-  )
-}
-
-function MoneyField({
-  value,
-  onChange,
-  placeholder,
-  autoFocus,
-}: {
-  value: string
-  onChange: (v: string) => void
-  placeholder?: string
-  autoFocus?: boolean
-}) {
-  return (
-    <div className="flex items-center bg-ink-800 border border-ink-700 rounded-xl px-4 py-3 focus-within:border-brand-500">
-      <span className="text-ink-500 text-lg mr-2">RM</span>
-      <input
-        type="number"
-        inputMode="decimal"
-        value={value}
-        autoFocus={autoFocus}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="flex-1 bg-transparent text-2xl font-semibold text-ink-100 placeholder:text-ink-600 focus:outline-none"
-      />
     </div>
   )
 }

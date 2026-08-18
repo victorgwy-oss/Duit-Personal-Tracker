@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import Sheet from '../components/Sheet'
+import AmountField from '../components/AmountField'
 import { useAccounts, useCategories } from '../hooks/useData'
 import { deleteTransaction, updateTransaction } from '../lib/repo'
 import { getReceiptUrl } from '../lib/receipts'
@@ -52,16 +53,12 @@ export default function EditTransaction({ txn, onClose }: { txn: Transaction | n
     <Sheet open={!!txn} onClose={onClose} title="Edit expense">
       <div className="flex flex-col gap-4">
         <Field label="Amount">
-          <div className="flex items-center bg-ink-800 border border-ink-700 rounded-xl px-3 py-2.5">
-            <span className="text-ink-500 mr-2">RM</span>
-            <input
-              type="number"
-              inputMode="decimal"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              className="flex-1 bg-transparent text-lg font-semibold text-ink-100 focus:outline-none"
-            />
-          </div>
+          <AmountField
+            value={amount === '' ? 0 : parseFloat(amount)}
+            onChange={(n) => setAmount(String(n))}
+            title="Edit amount"
+            big
+          />
         </Field>
 
         <Field label="Wallet">

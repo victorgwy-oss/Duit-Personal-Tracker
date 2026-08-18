@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import Sheet from './Sheet'
+import AmountField from './AmountField'
 import { useIncomeOverrides, useIncomeSources, useSettings } from '../hooks/useData'
 import { deleteIncomeSource, setIncomeOverride, upsertIncomeSource } from '../lib/repo'
 import { resolveIncome } from '../lib/income'
@@ -83,24 +84,12 @@ export default function IncomeSheet({
                 <span className="text-xs text-ink-500">default</span>
               )}
             </div>
-            <div className="flex items-center bg-ink-900 border border-ink-700 rounded-lg px-3 py-1.5">
-              <span className="text-ink-500 text-sm mr-2">{currency}</span>
-              <input
-                type="number"
-                inputMode="decimal"
-                defaultValue={amount || ''}
-                key={`${source.id}:${monthKey}:${amount}`}
-                placeholder="0.00"
-                onBlur={(e) => {
-                  const v = e.target.value.trim()
-                  if (v === '') return
-                  const num = parseFloat(v)
-                  if (Number.isNaN(num) || num === amount) return
-                  setIncomeOverride(source.id, monthKey, num)
-                }}
-                className="flex-1 bg-transparent text-right text-ink-100 text-sm focus:outline-none tabular-nums"
-              />
-            </div>
+            <AmountField
+              value={amount}
+              onChange={(n) => setIncomeOverride(source.id, monthKey, n)}
+              currency={currency}
+              title={`${source.name} · ${cycle?.label ?? ''}`}
+            />
           </div>
         ))}
       </div>
@@ -171,17 +160,12 @@ function SourceEditor({
         />
         <div>
           <div className="text-xs text-ink-400 mb-1.5">Typical monthly amount</div>
-          <div className="flex items-center bg-ink-800 border border-ink-700 rounded-xl px-3 py-2.5">
-            <span className="text-ink-500 mr-2">{currency}</span>
-            <input
-              type="number"
-              inputMode="decimal"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="0.00"
-              className="flex-1 bg-transparent text-ink-100 focus:outline-none"
-            />
-          </div>
+          <AmountField
+            value={amount === '' ? 0 : parseFloat(amount)}
+            onChange={(n) => setAmount(String(n))}
+            currency={currency}
+            title="Typical monthly amount"
+          />
           <p className="text-xs text-ink-500 mt-1.5">
             The default used every month. Override individual months from the Income screen.
           </p>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import Sheet from '../components/Sheet'
+import Keypad, { applyAmountKey } from '../components/Keypad'
 import { useAccounts, useCategories } from '../hooks/useData'
 import { addTransaction } from '../lib/repo'
 import { todayISO, formatShortDate } from '../lib/format'
@@ -43,16 +44,7 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
   const canSave = value > 0 && accountId && categoryId && !saving
 
   function press(key: string) {
-    setAmount((prev) => {
-      if (key === 'del') return prev.slice(0, -1)
-      if (key === '.') {
-        if (prev.includes('.')) return prev
-        return prev === '' ? '0.' : prev + '.'
-      }
-      // Limit to 2 decimal places.
-      if (prev.includes('.') && prev.split('.')[1]?.length >= 2) return prev
-      return prev + key
-    })
+    setAmount((prev) => applyAmountKey(prev, key))
   }
 
   async function save() {
@@ -112,7 +104,7 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
         </div>
 
         {/* Number pad */}
-        <NumberPad onPress={press} />
+        <Keypad onPress={press} />
 
         <button
           onClick={save}
@@ -192,20 +184,3 @@ function CategoryPicker({
   )
 }
 
-function NumberPad({ onPress }: { onPress: (key: string) => void }) {
-  // Bottom row: 0 on the left, decimal point in the middle, delete on the right.
-  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '.', 'del']
-  return (
-    <div className="grid grid-cols-3 gap-2">
-      {keys.map((k) => (
-        <button
-          key={k}
-          onClick={() => onPress(k)}
-          className="py-4 rounded-xl bg-ink-800 border border-ink-700 text-xl font-semibold text-ink-100 active:bg-ink-700 transition select-none"
-        >
-          {k === 'del' ? '⌫' : k}
-        </button>
-      ))}
-    </div>
-  )
-}
