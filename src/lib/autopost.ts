@@ -2,6 +2,7 @@ import { db } from '../db'
 import { addTransaction, upsertRecurring } from './repo'
 import { occurrencesInRange } from './recurring'
 import { todayISO } from './format'
+import { md5 } from './md5'
 import type { RecurringRule } from './types'
 
 // Mirrors what the Supabase pg_cron job will do server-side in Phase F: post any
@@ -9,6 +10,16 @@ import type { RecurringRule } from './types'
 // Idempotent by (recurringId, date) so running it repeatedly is safe.
 
 const LOOKBACK_START = '2000-01-01'
+
+// Deterministic transaction id for a recurring occurrence. Because the id is
+// derived from (ruleId, date) — matching Postgres md5() on the server — every
+// poster (this device, another device, the server cron) produces the SAME id
+// for the same charge, so a second insert collapses via upsert instead of
+// creating a duplicate row.
+export function recurringTxnId(ruleId: string, date: string): string {
+  const h = md5(`${ruleId}:${date}`)
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`
+}
 
 async function postedDatesForRule(ruleId: string): Promise<Set<string>> {
   const rows = await db.transactions.filter((t) => t.recurringId === ruleId && !t.deleted).toArray()
@@ -27,6 +38,7 @@ async function postRule(rule: RecurringRule): Promise<number> {
   const due = await dueOccurrences(rule)
   for (const date of due) {
     await addTransaction({
+      id: recurringTxnId(rule.id, date),
       date,
       amount: rule.amount,
       accountId: rule.accountId,
@@ -74,6 +86,7 @@ export async function pendingConfirmations(): Promise<PendingConfirm[]> {
 export async function confirmPending(rule: RecurringRule, dates: string[]): Promise<void> {
   for (const date of dates) {
     await addTransaction({
+      id: recurringTxnId(rule.id, date),
       date,
       amount: rule.amount,
       accountId: rule.accountId,
@@ -89,6 +102,7 @@ export async function confirmPending(rule: RecurringRule, dates: string[]): Prom
 // tombstone transaction so it won't be re-proposed.
 export async function skipPending(rule: RecurringRule, date: string): Promise<void> {
   await addTransaction({
+    id: recurringTxnId(rule.id, date),
     date,
     amount: 0,
     accountId: rule.accountId,

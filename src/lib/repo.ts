@@ -18,6 +18,7 @@ const now = () => Date.now()
 
 // ---- Transactions ----
 export interface NewTransaction {
+  id?: string // caller-supplied id for idempotent writes (e.g. recurring posts)
   date: string
   amount: number
   accountId: string
@@ -31,7 +32,7 @@ export interface NewTransaction {
 export async function addTransaction(input: NewTransaction): Promise<Transaction> {
   const t = now()
   const txn: Transaction = {
-    id: uid(),
+    id: input.id ?? uid(),
     date: input.date,
     amount: input.amount,
     accountId: input.accountId,
