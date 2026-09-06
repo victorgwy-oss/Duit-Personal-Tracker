@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
-import { useAccounts, useCategories, useRecurring, useSettings } from '../hooks/useData'
+import { useEffect, useMemo, useState } from 'react'
+import { useAccounts, useAllTransactions, useCategories, useRecurring, useSettings } from '../hooks/useData'
 import { upsertRecurring, deleteRecurring } from '../lib/repo'
 import { pendingConfirmations, confirmPending, skipPending, type PendingConfirm } from '../lib/autopost'
-import { cadenceLabel, monthlyEquivalent, monthlyCommitment, nthOccurrence, hasEnded } from '../lib/recurring'
+import { cadenceLabel, monthlyEquivalent, monthlyCommitment, nthOccurrence, hasEnded, occurrencesInRange } from '../lib/recurring'
 import { formatMoney, formatShortDate, todayISO } from '../lib/format'
 import { uid } from '../db'
 import Sheet from '../components/Sheet'
@@ -20,6 +20,17 @@ export default function RecurringScreen() {
   const activeRules = (rules ?? []).filter((r) => r.active)
   const monthlyTotal = monthlyCommitment(rules ?? [])
   const hasNonMonthly = activeRules.some((r) => r.cadence !== 'monthly')
+
+  // How many charges each rule has already posted, for installment progress.
+  const allTxns = useAllTransactions()
+  const paidByRule = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const t of allTxns ?? []) {
+      if (t.deleted || !t.recurringId) continue
+      m.set(t.recurringId, (m.get(t.recurringId) ?? 0) + 1)
+    }
+    return m
+  }, [allTxns])
 
   async function refreshPending() {
     setPending(await pendingConfirmations())
@@ -90,33 +101,50 @@ export default function RecurringScreen() {
       )}
 
       <div className="space-y-2 mb-4">
-        {(rules ?? []).filter((r) => r.active).map((r) => (
-          <button
-            key={r.id}
-            onClick={() => setEditing(r)}
-            className="w-full flex items-center gap-3 px-3 py-3 rounded-xl bg-ink-800 border border-ink-700 text-left"
-          >
-            <div className="flex-1">
-              <div className="text-sm text-ink-100 font-medium">{r.name}</div>
-              <div className="text-xs text-ink-500">
-                {cadenceLabel(r)} · {r.mode === 'auto' ? 'auto-posts' : 'asks first'}
-                {r.endDate && (
-                  <span className={hasEnded(r) ? 'text-ink-600' : 'text-ink-400'}>
-                    {' '}· {hasEnded(r) ? 'ended' : `ends ${formatShortDate(r.endDate)}`}
-                  </span>
+        {activeRules.map((r) => {
+          const total = r.endDate ? occurrencesInRange(r, r.startDate, r.endDate).length : 0
+          const paid = total > 0 ? Math.min(paidByRule.get(r.id) ?? 0, total) : 0
+          return (
+            <button
+              key={r.id}
+              onClick={() => setEditing(r)}
+              className="w-full flex items-center gap-3 px-3 py-3 rounded-xl bg-ink-800 border border-ink-700 text-left"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="text-sm text-ink-100 font-medium">{r.name}</div>
+                <div className="text-xs text-ink-500">
+                  {cadenceLabel(r)} · {r.mode === 'auto' ? 'auto-posts' : 'asks first'}
+                  {r.endDate &&
+                    (total > 0 ? (
+                      <span className={hasEnded(r) ? 'text-ink-600' : 'text-brand-400'}>
+                        {' '}· {paid}/{total} paid{hasEnded(r) ? ' · ended' : ''}
+                      </span>
+                    ) : (
+                      <span className={hasEnded(r) ? 'text-ink-600' : 'text-ink-400'}>
+                        {' '}· {hasEnded(r) ? 'ended' : `ends ${formatShortDate(r.endDate)}`}
+                      </span>
+                    ))}
+                </div>
+                {r.endDate && total > 0 && (
+                  <div className="mt-1.5 h-1 rounded-full bg-ink-700 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${hasEnded(r) ? 'bg-ink-500' : 'bg-brand-500'}`}
+                      style={{ width: `${(paid / total) * 100}%` }}
+                    />
+                  </div>
                 )}
               </div>
-            </div>
-            <div className="text-right">
-              <span className="text-sm font-medium text-ink-100 tabular-nums">{formatMoney(r.amount, currency)}</span>
-              {r.cadence !== 'monthly' && (
-                <div className="text-xs text-ink-500 tabular-nums">
-                  ≈ {formatMoney(monthlyEquivalent(r), currency)}/mo
-                </div>
-              )}
-            </div>
-          </button>
-        ))}
+              <div className="text-right shrink-0">
+                <span className="text-sm font-medium text-ink-100 tabular-nums">{formatMoney(r.amount, currency)}</span>
+                {r.cadence !== 'monthly' && (
+                  <div className="text-xs text-ink-500 tabular-nums">
+                    ≈ {formatMoney(monthlyEquivalent(r), currency)}/mo
+                  </div>
+                )}
+              </div>
+            </button>
+          )
+        })}
       </div>
 
       <button
