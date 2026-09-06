@@ -65,6 +65,7 @@ export interface RecurringRule {
   cadence: Cadence
   dayOfMonth: number // for monthly/annual: 1-31; for weekly: 0-6 (day of week)
   startDate: string // ISO yyyy-mm-dd
+  endDate?: string // ISO yyyy-mm-dd; last day a charge may post. Absent = repeats forever (e.g. a fixed-term installment)
   active: boolean
   mode: RecurringMode
   lastPostedPeriod: string | null // period key already posted, e.g. "2026-08"

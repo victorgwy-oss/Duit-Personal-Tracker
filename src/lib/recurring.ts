@@ -1,5 +1,11 @@
 import type { RecurringRule } from './types'
-import { fromISO, toISO } from './format'
+import { fromISO, toISO, todayISO } from './format'
+
+// A rule that has passed its end date no longer posts and shouldn't count as a
+// live commitment.
+export function hasEnded(rule: RecurringRule, on: string = todayISO()): boolean {
+  return !!rule.endDate && rule.endDate < on
+}
 
 // Compute the calendar dates a rule "fires" on within [startISO, endISO].
 // This is the single source of truth used by both the dashboard projection
@@ -10,8 +16,13 @@ export function occurrencesInRange(
   endISO: string,
 ): string[] {
   const start = fromISO(startISO)
-  const end = fromISO(endISO)
+  let end = fromISO(endISO)
   const ruleStart = fromISO(rule.startDate)
+  // A rule with an end date stops after it (e.g. a 12-month installment).
+  if (rule.endDate) {
+    const ruleEnd = fromISO(rule.endDate)
+    if (ruleEnd < end) end = ruleEnd
+  }
   const out: string[] = []
 
   // Never fire before the rule's own start date.
@@ -55,6 +66,19 @@ function clampToMonth(year: number, month: number, day: number): number {
   return Math.min(Math.max(day, 1), last)
 }
 
+// Date of the n-th occurrence (1-based), ignoring any end date. Used by the
+// editor's "for N payments" mode to compute the end date of an installment.
+export function nthOccurrence(rule: RecurringRule, n: number): string | null {
+  if (n < 1) return null
+  const start = fromISO(rule.startDate)
+  const window = new Date(start)
+  if (rule.cadence === 'weekly') window.setDate(window.getDate() + (n + 2) * 7)
+  else if (rule.cadence === 'monthly') window.setMonth(window.getMonth() + (n + 2))
+  else window.setFullYear(window.getFullYear() + (n + 2))
+  const occ = occurrencesInRange({ ...rule, endDate: undefined }, rule.startDate, toISO(window))
+  return occ[n - 1] ?? null
+}
+
 // What one rule costs in an average month, normalising weekly and annual
 // charges so they can be summed into a single "fixed cost per month" figure.
 export function monthlyEquivalent(rule: RecurringRule): number {
@@ -66,7 +90,7 @@ export function monthlyEquivalent(rule: RecurringRule): number {
 // Sum of the monthly-equivalent cost of every active, live rule.
 export function monthlyCommitment(rules: RecurringRule[]): number {
   return rules
-    .filter((r) => r.active && !r.deleted)
+    .filter((r) => r.active && !r.deleted && !hasEnded(r))
     .reduce((sum, r) => sum + monthlyEquivalent(r), 0)
 }
 

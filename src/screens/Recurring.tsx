@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAccounts, useCategories, useRecurring, useSettings } from '../hooks/useData'
 import { upsertRecurring, deleteRecurring } from '../lib/repo'
 import { pendingConfirmations, confirmPending, skipPending, type PendingConfirm } from '../lib/autopost'
-import { cadenceLabel, monthlyEquivalent, monthlyCommitment } from '../lib/recurring'
+import { cadenceLabel, monthlyEquivalent, monthlyCommitment, nthOccurrence, hasEnded } from '../lib/recurring'
 import { formatMoney, formatShortDate, todayISO } from '../lib/format'
 import { uid } from '../db'
 import Sheet from '../components/Sheet'
@@ -100,6 +100,11 @@ export default function RecurringScreen() {
               <div className="text-sm text-ink-100 font-medium">{r.name}</div>
               <div className="text-xs text-ink-500">
                 {cadenceLabel(r)} · {r.mode === 'auto' ? 'auto-posts' : 'asks first'}
+                {r.endDate && (
+                  <span className={hasEnded(r) ? 'text-ink-600' : 'text-ink-400'}>
+                    {' '}· {hasEnded(r) ? 'ended' : `ends ${formatShortDate(r.endDate)}`}
+                  </span>
+                )}
               </div>
             </div>
             <div className="text-right">
@@ -145,6 +150,9 @@ function RuleEditor({ rule, onClose }: { rule: RecurringRule | null; onClose: ()
   const [dayOfMonth, setDayOfMonth] = useState(rule?.dayOfMonth ?? 1)
   const [mode, setMode] = useState<RecurringMode>(rule?.mode ?? 'auto')
   const [startDate, setStartDate] = useState(rule?.startDate ?? todayISO())
+  const [endMode, setEndMode] = useState<'forever' | 'date' | 'count'>(rule?.endDate ? 'date' : 'forever')
+  const [endDate, setEndDate] = useState(rule?.endDate ?? '')
+  const [count, setCount] = useState('12')
 
   useEffect(() => {
     if (!accountId && accounts?.[0]) setAccountId(accounts[0].id)
@@ -157,6 +165,23 @@ function RuleEditor({ rule, onClose }: { rule: RecurringRule | null; onClose: ()
 
   const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
+  // The end date actually saved, resolved from whichever mode is active. In
+  // "installments" mode we compute the date of the Nth charge from the schedule.
+  function resolveEndDate(): string | undefined {
+    if (endMode === 'forever') return undefined
+    if (endMode === 'date') return endDate || undefined
+    const n = parseInt(count || '0', 10)
+    if (!n || n < 1) return undefined
+    const temp: RecurringRule = {
+      id: 'temp', name: '', amount: 0, accountId, categoryId,
+      cadence, dayOfMonth, startDate, active: true, mode, lastPostedPeriod: null, updatedAt: 0,
+    }
+    return nthOccurrence(temp, n) ?? undefined
+  }
+
+  const installmentEnd = endMode === 'count' ? resolveEndDate() : undefined
+  const installmentN = parseInt(count || '0', 10)
+
   async function save() {
     if (!name.trim() || !accountId || !categoryId) return
     await upsertRecurring({
@@ -168,6 +193,7 @@ function RuleEditor({ rule, onClose }: { rule: RecurringRule | null; onClose: ()
       cadence,
       dayOfMonth,
       startDate,
+      endDate: resolveEndDate(),
       active: true,
       mode,
       lastPostedPeriod: rule?.lastPostedPeriod ?? null,
@@ -289,6 +315,64 @@ function RuleEditor({ rule, onClose }: { rule: RecurringRule | null; onClose: ()
             onChange={(e) => setStartDate(e.target.value)}
             className="w-full bg-ink-800 border border-ink-700 rounded-xl px-3 py-2.5 text-ink-100 focus:outline-none focus:border-brand-500"
           />
+        </Labeled>
+
+        <Labeled label="Repeats until">
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            {(
+              [
+                ['forever', 'Forever'],
+                ['date', 'End date'],
+                ['count', 'Installments'],
+              ] as const
+            ).map(([v, lbl]) => (
+              <button
+                key={v}
+                onClick={() => setEndMode(v)}
+                className={`py-2 rounded-lg text-sm ${endMode === v ? 'bg-brand-500 text-ink-950' : 'bg-ink-800 text-ink-300'}`}
+              >
+                {lbl}
+              </button>
+            ))}
+          </div>
+
+          {endMode === 'forever' && (
+            <p className="text-xs text-ink-500">Keeps posting until you delete it.</p>
+          )}
+
+          {endMode === 'date' && (
+            <input
+              type="date"
+              value={endDate}
+              min={startDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="w-full bg-ink-800 border border-ink-700 rounded-xl px-3 py-2.5 text-ink-100 focus:outline-none focus:border-brand-500"
+            />
+          )}
+
+          {endMode === 'count' && (
+            <div>
+              <div className="flex items-center gap-2 text-sm text-ink-300">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={count}
+                  min={1}
+                  onChange={(e) => setCount(e.target.value)}
+                  className="w-20 bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-ink-100 text-center"
+                />
+                {cadence === 'weekly' ? 'weekly' : cadence === 'annual' ? 'yearly' : 'monthly'} payments
+              </div>
+              {installmentEnd && installmentN >= 1 ? (
+                <p className="text-xs text-ink-500 mt-1.5">
+                  {installmentN} charge{installmentN > 1 ? 's' : ''} · last on {formatShortDate(installmentEnd)} · total{' '}
+                  {formatMoney(parseFloat(amount || '0') * installmentN)}
+                </p>
+              ) : (
+                <p className="text-xs text-ink-500 mt-1.5">Set how many charges in total (e.g. 12 for a 12-month plan).</p>
+              )}
+            </div>
+          )}
         </Labeled>
 
         <Labeled label="When it's due">

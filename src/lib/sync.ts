@@ -51,8 +51,8 @@ const TABLES: Record<SyncTable, TableConfig> = {
   recurring: {
     remote: 'recurring_rules',
     dexie: () => db.recurring,
-    toRemote: (r, uid) => ({ id: r.id, user_id: uid, name: r.name, amount: r.amount, account_id: r.accountId, category_id: r.categoryId, cadence: r.cadence, day_of_month: r.dayOfMonth, start_date: r.startDate, active: !!r.active, mode: r.mode, last_posted_period: r.lastPostedPeriod ?? null, updated_at: r.updatedAt, deleted: !!r.deleted }),
-    fromRemote: (x) => ({ id: x.id, name: x.name, amount: Number(x.amount), accountId: x.account_id, categoryId: x.category_id, cadence: x.cadence, dayOfMonth: x.day_of_month, startDate: x.start_date, active: !!x.active, mode: x.mode, lastPostedPeriod: x.last_posted_period ?? null, updatedAt: num(x.updated_at), deleted: !!x.deleted }),
+    toRemote: (r, uid) => ({ id: r.id, user_id: uid, name: r.name, amount: r.amount, account_id: r.accountId, category_id: r.categoryId, cadence: r.cadence, day_of_month: r.dayOfMonth, start_date: r.startDate, end_date: r.endDate ?? null, active: !!r.active, mode: r.mode, last_posted_period: r.lastPostedPeriod ?? null, updated_at: r.updatedAt, deleted: !!r.deleted }),
+    fromRemote: (x) => ({ id: x.id, name: x.name, amount: Number(x.amount), accountId: x.account_id, categoryId: x.category_id, cadence: x.cadence, dayOfMonth: x.day_of_month, startDate: x.start_date, endDate: x.end_date ?? undefined, active: !!x.active, mode: x.mode, lastPostedPeriod: x.last_posted_period ?? null, updatedAt: num(x.updated_at), deleted: !!x.deleted }),
   },
   settings: {
     remote: 'settings',
