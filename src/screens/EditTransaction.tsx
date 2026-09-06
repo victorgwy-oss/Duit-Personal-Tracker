@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Sheet from '../components/Sheet'
 import AmountField from '../components/AmountField'
-import { useAccounts, useCategories } from '../hooks/useData'
+import { useAccounts, useAllTransactions, useCategories } from '../hooks/useData'
+import { orderCategoriesByUsage } from '../lib/categories'
 import { deleteTransaction, updateTransaction } from '../lib/repo'
 import { getReceiptUrl } from '../lib/receipts'
 import { todayISO } from '../lib/format'
@@ -11,6 +12,11 @@ import type { Transaction } from '../lib/types'
 export default function EditTransaction({ txn, onClose }: { txn: Transaction | null; onClose: () => void }) {
   const accounts = useAccounts()
   const categories = useCategories()
+  const allTxns = useAllTransactions()
+  const orderedCategories = useMemo(
+    () => orderCategoriesByUsage(categories ?? [], allTxns),
+    [categories, allTxns],
+  )
   const [amount, setAmount] = useState('')
   const [accountId, setAccountId] = useState('')
   const [categoryId, setCategoryId] = useState('')
@@ -77,7 +83,7 @@ export default function EditTransaction({ txn, onClose }: { txn: Transaction | n
 
         <Field label="Category">
           <div className="flex flex-wrap gap-2">
-            {(categories ?? []).map((c) => (
+            {orderedCategories.map((c) => (
               <button
                 key={c.id}
                 onClick={() => setCategoryId(c.id)}

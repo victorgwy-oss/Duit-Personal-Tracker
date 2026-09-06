@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Sheet from '../components/Sheet'
 import Keypad, { applyAmountKey } from '../components/Keypad'
-import { useAccounts, useCategories } from '../hooks/useData'
+import { useAccounts, useAllTransactions, useCategories } from '../hooks/useData'
 import { addTransaction } from '../lib/repo'
+import { orderCategoriesByUsage } from '../lib/categories'
 import { todayISO, formatShortDate } from '../lib/format'
 import type { Account, Category } from '../lib/types'
 
@@ -16,6 +17,11 @@ interface Props {
 export default function QuickAdd({ open, onClose, prefill }: Props) {
   const accounts = useAccounts()
   const categories = useCategories()
+  const txns = useAllTransactions()
+  const orderedCategories = useMemo(
+    () => orderCategoriesByUsage(categories ?? [], txns),
+    [categories, txns],
+  )
 
   const [amount, setAmount] = useState('')
   const [accountId, setAccountId] = useState<string>('')
@@ -31,14 +37,14 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
     setNote(prefill?.note ?? '')
     setDate(prefill?.date ?? todayISO())
     setAccountId(prefill?.accountId ?? accounts?.[0]?.id ?? '')
-    setCategoryId(prefill?.categoryId ?? categories?.[0]?.id ?? '')
+    setCategoryId(prefill?.categoryId ?? orderedCategories[0]?.id ?? '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   useEffect(() => {
     if (open && !accountId && accounts?.[0]) setAccountId(accounts[0].id)
-    if (open && !categoryId && categories?.[0]) setCategoryId(categories[0].id)
-  }, [open, accounts, categories, accountId, categoryId])
+    if (open && !categoryId && orderedCategories[0]) setCategoryId(orderedCategories[0].id)
+  }, [open, accounts, orderedCategories, accountId, categoryId])
 
   const value = parseFloat(amount || '0')
   const canSave = value > 0 && accountId && categoryId && !saving
@@ -81,7 +87,7 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
         <WalletPicker accounts={accounts} value={accountId} onChange={setAccountId} />
 
         {/* Category chips */}
-        <CategoryPicker categories={categories} value={categoryId} onChange={setCategoryId} />
+        <CategoryPicker categories={orderedCategories} value={categoryId} onChange={setCategoryId} />
 
         {/* Note + date */}
         <div className="flex gap-2">
