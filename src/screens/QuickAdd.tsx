@@ -185,9 +185,10 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
               className="flex-1 min-w-0 bg-ink-800 border border-ink-700 rounded-xl px-3 py-2.5 text-sm text-ink-100 placeholder:text-ink-500 focus:outline-none focus:border-brand-500"
             />
           )}
-          {/* overflow-hidden keeps the invisible date input inside this pill —
-              iOS gives date inputs a min-width wider than "Today", which
-              otherwise pokes past the screen edge and lets the sheet pan. */}
+          {/* overflow-hidden keeps the invisible date input inside this pill.
+              A mobile browser can size a date input wider than "Today" (narrow
+              screens, enlarged system text), letting it poke past the screen
+              edge; the sheet body is also locked to vertical scroll. */}
           <label
             className={`relative overflow-hidden bg-ink-800 border border-ink-700 rounded-xl px-3 py-2.5 text-sm text-ink-300 flex items-center gap-2 cursor-pointer shrink-0 ${
               kind === 'income' && !addsPayment ? 'flex-1 justify-between' : ''
