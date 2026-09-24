@@ -149,7 +149,9 @@ export async function upsertIncomeSource(
 // from zero and build up from payments.
 export async function setTrackPayments(sourceId: string, on: boolean): Promise<void> {
   const src = await db.incomeSources.get(sourceId)
-  if (!src || !!src.trackPayments === on) return
+  // Strict compare: a never-decided stream (undefined) still gets an explicit
+  // true/false stored, so the + screen knows whether to add or set.
+  if (!src || src.trackPayments === on) return
 
   if (on && src.defaultAmount > 0) {
     const settings = await db.settings.get('singleton')

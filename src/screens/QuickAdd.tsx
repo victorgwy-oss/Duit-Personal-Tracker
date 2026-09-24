@@ -10,7 +10,7 @@ import {
   useIncomeSources,
   useSettings,
 } from '../hooks/useData'
-import { addIncomePayment, addTransaction, setIncomeOverride } from '../lib/repo'
+import { addIncomePayment, addTransaction, setIncomeOverride, setTrackPayments } from '../lib/repo'
 import { orderCategoriesByUsage } from '../lib/categories'
 import { orderAccountsByUsage } from '../lib/wallets'
 import { resolveIncome } from '../lib/income'
@@ -54,6 +54,8 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
   const [note, setNote] = useState('')
   const [date, setDate] = useState(todayISO())
   const [saving, setSaving] = useState(false)
+  // For an income stream whose type was never chosen, the user picks once.
+  const [pick, setPick] = useState<'add' | 'set' | null>(null)
 
   // Initialise defaults when the sheet opens. Always start on Expense (the
   // common case); the receipt scanner's prefill is an expense too.
@@ -75,14 +77,20 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
     if (open && !sourceId && orderedSources[0]) setSourceId(orderedSources[0].id)
   }, [open, orderedAccounts, orderedCategories, orderedSources, accountId, categoryId, sourceId])
 
+  useEffect(() => setPick(null), [sourceId, open])
+
   // Income: payment-logged streams (business) get a payment ADDED; fixed
-  // streams (salary, rent) get the month's amount SET — adding a "payment" to
-  // a fixed stream would double-count its regular amount.
+  // streams (salary, rent) get the month's amount REPLACED — adding a
+  // "payment" to a fixed stream would double-count its regular amount. A
+  // stream whose type was never chosen is never guessed: the user picks once
+  // and it's remembered (guessing "fixed" once overwrote a business total).
   const settings = useSettings()
   const overrides = useIncomeOverrides()
   const incomePayments = useIncomePayments()
   const source = orderedSources.find((s) => s.id === sourceId)
-  const addsPayment = !!source?.trackPayments
+  const decided = source?.trackPayments // true = adds payments, false = fixed, undefined = never chosen
+  const action: 'add' | 'set' | null = decided === true ? 'add' : decided === false ? 'set' : pick
+  const addsPayment = action === 'add'
   const cycle = getCycle(settings?.cycleStartDay ?? 1, fromISO(date))
   const monthName = cycle.label.split(' ')[0]
   const currentForSource = source
@@ -94,7 +102,7 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
 
   const value = parseFloat(amount || '0')
   const canSave =
-    value > 0 && !saving && (kind === 'expense' ? !!accountId && !!categoryId : !!sourceId)
+    value > 0 && !saving && (kind === 'expense' ? !!accountId && !!categoryId : !!sourceId && action !== null)
 
   function press(key: string) {
     setAmount((prev) => applyAmountKey(prev, key))
@@ -113,10 +121,11 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
           note: note.trim(),
           source: 'manual',
         })
-      } else if (addsPayment) {
-        await addIncomePayment({ sourceId, date, amount: value, note })
-      } else {
+      } else if (action === 'add') {
+        await addIncomePayment({ sourceId, date, amount: value, note }) // also marks the stream payment-logged
+      } else if (action === 'set') {
         await setIncomeOverride(sourceId, cycle.key, value)
+        if (decided === undefined) await setTrackPayments(sourceId, false) // remember: fixed
       }
       onClose()
     } finally {
@@ -145,7 +154,11 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
         {/* Amount display */}
         <div className="text-center">
           <div className="text-ink-500 text-sm mb-1">
-            {kind === 'expense' ? 'Amount' : addsPayment ? 'Payment received' : `Amount for ${monthName}`}
+            {kind === 'expense' || action === null
+              ? 'Amount'
+              : addsPayment
+                ? 'Payment received'
+                : `Amount for ${monthName}`}
           </div>
           <div className={`text-5xl font-bold tabular-nums ${kind === 'income' ? 'text-good' : 'text-ink-100'}`}>
             <span className="text-2xl text-ink-500 align-top mr-1">RM</span>
@@ -164,11 +177,38 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
         ) : (
           <div>
             <SourcePicker sources={orderedSources} value={sourceId} onChange={setSourceId} />
-            {source && (
+            {source && decided === undefined && (
+              <div className="mt-3 rounded-xl border border-warn/30 bg-warn/10 p-3">
+                <p className="text-xs text-ink-300 mb-2">
+                  First time recording <span className="font-semibold">{source.name}</span> here — how does this
+                  income work? You can change it later in Settings → Income streams.
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {(
+                    [
+                      ['add', 'Add payments', 'Varies, e.g. business. Each entry adds to the month.'],
+                      ['set', 'Set the month', "Steady, e.g. rent. Replaces the month's amount."],
+                    ] as const
+                  ).map(([v, title, hint]) => (
+                    <button
+                      key={v}
+                      onClick={() => setPick(v)}
+                      className={`text-left rounded-lg border px-2.5 py-2 ${
+                        pick === v ? 'border-good bg-good/15' : 'border-ink-700 bg-ink-800'
+                      }`}
+                    >
+                      <div className={`text-sm font-medium ${pick === v ? 'text-good' : 'text-ink-100'}`}>{title}</div>
+                      <div className="text-[11px] text-ink-400 leading-snug mt-0.5">{hint}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {source && action && (
               <p className="text-xs text-ink-500 mt-2 text-center">
                 {addsPayment
                   ? `Adds a payment to ${source.name} for ${monthName} · ${formatMoney(currentForSource)} so far`
-                  : `Sets ${source.name} for ${monthName} · currently ${formatMoney(currentForSource)}`}
+                  : `Replaces ${source.name} for ${monthName} · currently ${formatMoney(currentForSource)}`}
               </p>
             )}
           </div>
@@ -226,9 +266,11 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
             ? 'Saving…'
             : kind === 'expense'
               ? 'Save expense'
-              : addsPayment
-                ? 'Save income'
-                : `Set for ${monthName}`}
+              : action === null
+                ? 'Choose how to record it'
+                : addsPayment
+                  ? 'Save income'
+                  : `Set for ${monthName}`}
         </button>
       </div>
     </Sheet>

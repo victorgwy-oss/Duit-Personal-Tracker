@@ -353,7 +353,9 @@ function SourceEditor({
       })
     } else {
       await upsertIncomeSource({ id: source.id, name: name.trim(), defaultAmount, color, active: source.active })
-      if (!!source.trackPayments !== track) await setTrackPayments(source.id, track)
+      // Store the choice explicitly (even "Fixed monthly" on a never-decided
+      // stream) so the + screen never has to guess.
+      if (source.trackPayments !== track) await setTrackPayments(source.id, track)
     }
     onClose()
   }
