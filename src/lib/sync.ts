@@ -12,6 +12,7 @@ export type SyncTable =
   | 'settings'
   | 'incomeSources'
   | 'incomeOverrides'
+  | 'incomePayments'
 
 // --- Table mapping between the local (camelCase) store and Postgres (snake_case) ---
 interface TableConfig {
@@ -63,8 +64,14 @@ const TABLES: Record<SyncTable, TableConfig> = {
   incomeSources: {
     remote: 'income_sources',
     dexie: () => db.incomeSources,
-    toRemote: (r, uid) => ({ id: r.id, user_id: uid, name: r.name, default_amount: r.defaultAmount, color: r.color, active: !!r.active, updated_at: r.updatedAt, deleted: !!r.deleted }),
-    fromRemote: (x) => ({ id: x.id, name: x.name, defaultAmount: num(x.default_amount), color: x.color, active: !!x.active, updatedAt: num(x.updated_at), deleted: !!x.deleted }),
+    toRemote: (r, uid) => {
+      const row: any = { id: r.id, user_id: uid, name: r.name, default_amount: r.defaultAmount, color: r.color, active: !!r.active, updated_at: r.updatedAt, deleted: !!r.deleted }
+      // Only send track_payments once it's been set, so sync keeps working
+      // before the 0006 migration adds the column.
+      if (r.trackPayments !== undefined) row.track_payments = !!r.trackPayments
+      return row
+    },
+    fromRemote: (x) => ({ id: x.id, name: x.name, defaultAmount: num(x.default_amount), color: x.color, active: !!x.active, trackPayments: x.track_payments ?? undefined, updatedAt: num(x.updated_at), deleted: !!x.deleted }),
   },
   incomeOverrides: {
     remote: 'income_overrides',
@@ -72,9 +79,15 @@ const TABLES: Record<SyncTable, TableConfig> = {
     toRemote: (r, uid) => ({ id: r.id, user_id: uid, source_id: r.sourceId, month_key: r.monthKey, amount: r.amount, updated_at: r.updatedAt, deleted: !!r.deleted }),
     fromRemote: (x) => ({ id: x.id, sourceId: x.source_id, monthKey: x.month_key, amount: num(x.amount), updatedAt: num(x.updated_at), deleted: !!x.deleted }),
   },
+  incomePayments: {
+    remote: 'income_payments',
+    dexie: () => db.incomePayments,
+    toRemote: (r, uid) => ({ id: r.id, user_id: uid, source_id: r.sourceId, date: r.date, amount: r.amount, note: r.note ?? '', created_at: r.createdAt, updated_at: r.updatedAt, deleted: !!r.deleted }),
+    fromRemote: (x) => ({ id: x.id, sourceId: x.source_id, date: x.date, amount: num(x.amount), note: x.note ?? '', createdAt: num(x.created_at), updatedAt: num(x.updated_at), deleted: !!x.deleted }),
+  },
 }
 
-const TABLE_ORDER: SyncTable[] = ['settings', 'accounts', 'categories', 'recurring', 'transactions', 'incomeSources', 'incomeOverrides']
+const TABLE_ORDER: SyncTable[] = ['settings', 'accounts', 'categories', 'recurring', 'transactions', 'incomeSources', 'incomeOverrides', 'incomePayments']
 
 // --- Offline write queue (survives reloads / offline) ---
 const QUEUE_KEY = 'duit_sync_queue'

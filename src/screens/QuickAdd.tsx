@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import Sheet from '../components/Sheet'
 import Keypad, { applyAmountKey } from '../components/Keypad'
-import { useAccounts, useAllTransactions, useCategories } from '../hooks/useData'
-import { addTransaction } from '../lib/repo'
+import { useAccounts, useAllTransactions, useCategories, useIncomeSources } from '../hooks/useData'
+import { addIncomePayment, addTransaction } from '../lib/repo'
 import { orderCategoriesByUsage } from '../lib/categories'
+import { orderAccountsByUsage } from '../lib/wallets'
 import { todayISO, formatShortDate } from '../lib/format'
-import type { Account, Category } from '../lib/types'
+import type { Account, Category, IncomeSource } from '../lib/types'
 
 interface Props {
   open: boolean
@@ -14,40 +15,59 @@ interface Props {
   prefill?: Partial<{ amount: number; note: string; categoryId: string; accountId: string; date: string }>
 }
 
+type Kind = 'expense' | 'income'
+
 export default function QuickAdd({ open, onClose, prefill }: Props) {
   const accounts = useAccounts()
   const categories = useCategories()
+  const incomeSources = useIncomeSources()
   const txns = useAllTransactions()
   const orderedCategories = useMemo(
     () => orderCategoriesByUsage(categories ?? [], txns),
     [categories, txns],
   )
+  const orderedAccounts = useMemo(() => orderAccountsByUsage(accounts ?? [], txns), [accounts, txns])
+  // Payment-logged streams (business) first — those are what you log here.
+  const orderedSources = useMemo(
+    () =>
+      (incomeSources ?? [])
+        .filter((s) => s.active)
+        .sort((a, b) => Number(!!b.trackPayments) - Number(!!a.trackPayments) || a.name.localeCompare(b.name)),
+    [incomeSources],
+  )
 
+  const [kind, setKind] = useState<Kind>('expense')
   const [amount, setAmount] = useState('')
   const [accountId, setAccountId] = useState<string>('')
   const [categoryId, setCategoryId] = useState<string>('')
+  const [sourceId, setSourceId] = useState<string>('')
   const [note, setNote] = useState('')
   const [date, setDate] = useState(todayISO())
   const [saving, setSaving] = useState(false)
 
-  // Initialise defaults when the sheet opens.
+  // Initialise defaults when the sheet opens. Always start on Expense (the
+  // common case); the receipt scanner's prefill is an expense too.
   useEffect(() => {
     if (!open) return
+    setKind('expense')
     setAmount(prefill?.amount ? String(prefill.amount) : '')
     setNote(prefill?.note ?? '')
     setDate(prefill?.date ?? todayISO())
-    setAccountId(prefill?.accountId ?? accounts?.[0]?.id ?? '')
+    setAccountId(prefill?.accountId ?? orderedAccounts[0]?.id ?? '')
     setCategoryId(prefill?.categoryId ?? orderedCategories[0]?.id ?? '')
+    setSourceId(orderedSources[0]?.id ?? '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   useEffect(() => {
-    if (open && !accountId && accounts?.[0]) setAccountId(accounts[0].id)
+    if (open && !accountId && orderedAccounts[0]) setAccountId(orderedAccounts[0].id)
     if (open && !categoryId && orderedCategories[0]) setCategoryId(orderedCategories[0].id)
-  }, [open, accounts, orderedCategories, accountId, categoryId])
+    if (open && !sourceId && orderedSources[0]) setSourceId(orderedSources[0].id)
+  }, [open, orderedAccounts, orderedCategories, orderedSources, accountId, categoryId, sourceId])
 
   const value = parseFloat(amount || '0')
-  const canSave = value > 0 && accountId && categoryId && !saving
+  const canSave =
+    value > 0 && !saving && (kind === 'expense' ? !!accountId && !!categoryId : !!sourceId)
 
   function press(key: string) {
     setAmount((prev) => applyAmountKey(prev, key))
@@ -57,14 +77,18 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
     if (!canSave) return
     setSaving(true)
     try {
-      await addTransaction({
-        date,
-        amount: value,
-        accountId,
-        categoryId,
-        note: note.trim(),
-        source: 'manual',
-      })
+      if (kind === 'expense') {
+        await addTransaction({
+          date,
+          amount: value,
+          accountId,
+          categoryId,
+          note: note.trim(),
+          source: 'manual',
+        })
+      } else {
+        await addIncomePayment({ sourceId, date, amount: value, note })
+      }
       onClose()
     } finally {
       setSaving(false)
@@ -72,29 +96,50 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title="Add expense" full>
+    <Sheet open={open} onClose={onClose} title={kind === 'expense' ? 'Add expense' : 'Add income'} full>
       <div className="flex flex-col gap-5">
+        {/* Expense / Income switch */}
+        <div className="grid grid-cols-2 gap-2 p-1 rounded-xl bg-ink-800">
+          {(['expense', 'income'] as const).map((k) => (
+            <button
+              key={k}
+              onClick={() => setKind(k)}
+              className={`py-2 rounded-lg text-sm font-medium capitalize transition ${
+                kind === k ? (k === 'income' ? 'bg-good text-ink-950' : 'bg-brand-500 text-ink-950') : 'text-ink-400'
+              }`}
+            >
+              {k}
+            </button>
+          ))}
+        </div>
+
         {/* Amount display */}
-        <div className="text-center pt-2">
-          <div className="text-ink-500 text-sm mb-1">Amount</div>
-          <div className="text-5xl font-bold text-ink-100 tabular-nums">
+        <div className="text-center">
+          <div className="text-ink-500 text-sm mb-1">{kind === 'expense' ? 'Amount' : 'Payment received'}</div>
+          <div className={`text-5xl font-bold tabular-nums ${kind === 'income' ? 'text-good' : 'text-ink-100'}`}>
             <span className="text-2xl text-ink-500 align-top mr-1">RM</span>
             {amount || '0'}
           </div>
         </div>
 
-        {/* Wallet toggle */}
-        <WalletPicker accounts={accounts} value={accountId} onChange={setAccountId} />
+        {kind === 'expense' ? (
+          <>
+            {/* Wallet toggle */}
+            <WalletPicker accounts={orderedAccounts} value={accountId} onChange={setAccountId} />
 
-        {/* Category chips */}
-        <CategoryPicker categories={orderedCategories} value={categoryId} onChange={setCategoryId} />
+            {/* Category chips */}
+            <CategoryPicker categories={orderedCategories} value={categoryId} onChange={setCategoryId} />
+          </>
+        ) : (
+          <SourcePicker sources={orderedSources} value={sourceId} onChange={setSourceId} />
+        )}
 
         {/* Note + date */}
         <div className="flex gap-2">
           <input
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Note (optional)"
+            placeholder={kind === 'expense' ? 'Note (optional)' : 'Client / invoice (optional)'}
             className="flex-1 bg-ink-800 border border-ink-700 rounded-xl px-3 py-2.5 text-sm text-ink-100 placeholder:text-ink-500 focus:outline-none focus:border-brand-500"
           />
           <label className="relative bg-ink-800 border border-ink-700 rounded-xl px-3 py-2.5 text-sm text-ink-300 flex items-center gap-2 cursor-pointer">
@@ -117,10 +162,47 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
           disabled={!canSave}
           className="w-full py-4 rounded-2xl bg-brand-500 text-ink-950 font-semibold text-lg disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.99] transition"
         >
-          {saving ? 'Saving…' : 'Save expense'}
+          {saving ? 'Saving…' : kind === 'expense' ? 'Save expense' : 'Save income'}
         </button>
       </div>
     </Sheet>
+  )
+}
+
+function SourcePicker({
+  sources,
+  value,
+  onChange,
+}: {
+  sources: IncomeSource[]
+  value: string
+  onChange: (id: string) => void
+}) {
+  if (sources.length === 0) {
+    return (
+      <p className="text-sm text-ink-500 text-center">
+        No income streams yet — add one under Settings → Income streams.
+      </p>
+    )
+  }
+  return (
+    <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-5 px-5 py-1">
+      {sources.map((s) => {
+        const active = s.id === value
+        return (
+          <button
+            key={s.id}
+            onClick={() => onChange(s.id)}
+            className={`shrink-0 px-3 py-2 rounded-full border text-sm flex items-center gap-1.5 transition ${
+              active ? 'border-good bg-good/15 text-good' : 'border-ink-700 bg-ink-800 text-ink-300'
+            }`}
+          >
+            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} />
+            {s.name}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 

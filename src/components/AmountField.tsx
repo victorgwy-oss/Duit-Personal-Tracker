@@ -14,6 +14,7 @@ export default function AmountField({
   big = false,
   title = 'Enter amount',
   className,
+  autoOpen = false,
 }: {
   value: number
   onChange: (n: number) => void
@@ -23,8 +24,9 @@ export default function AmountField({
   big?: boolean
   title?: string
   className?: string
+  autoOpen?: boolean // open the keypad immediately (e.g. when adding a new entry)
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(autoOpen)
   const shown = value ? value.toLocaleString('en-MY', { maximumFractionDigits: 2 }) : ''
 
   const base = compact

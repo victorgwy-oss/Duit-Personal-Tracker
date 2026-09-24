@@ -15,24 +15,27 @@ interface BackupFile {
     settings: unknown[]
     incomeSources?: unknown[]
     incomeOverrides?: unknown[]
+    incomePayments?: unknown[]
   }
 }
 
 export async function exportBackup(): Promise<void> {
-  const [accounts, categories, transactions, recurring, settings, incomeSources, incomeOverrides] = await Promise.all([
-    db.accounts.toArray(),
-    db.categories.toArray(),
-    db.transactions.toArray(),
-    db.recurring.toArray(),
-    db.settings.toArray(),
-    db.incomeSources.toArray(),
-    db.incomeOverrides.toArray(),
-  ])
+  const [accounts, categories, transactions, recurring, settings, incomeSources, incomeOverrides, incomePayments] =
+    await Promise.all([
+      db.accounts.toArray(),
+      db.categories.toArray(),
+      db.transactions.toArray(),
+      db.recurring.toArray(),
+      db.settings.toArray(),
+      db.incomeSources.toArray(),
+      db.incomeOverrides.toArray(),
+      db.incomePayments.toArray(),
+    ])
   const payload: BackupFile = {
     app: 'duit-finance',
     version: 1,
     exportedAt: new Date().toISOString(),
-    data: { accounts, categories, transactions, recurring, settings, incomeSources, incomeOverrides },
+    data: { accounts, categories, transactions, recurring, settings, incomeSources, incomeOverrides, incomePayments },
   }
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
@@ -49,10 +52,20 @@ export async function importBackup(file: File): Promise<{ transactions: number }
   if (parsed.app !== 'duit-finance') {
     throw new Error('Not a Duit backup file.')
   }
-  const { accounts, categories, transactions, recurring, settings, incomeSources, incomeOverrides } = parsed.data
+  const { accounts, categories, transactions, recurring, settings, incomeSources, incomeOverrides, incomePayments } =
+    parsed.data
   await db.transaction(
     'rw',
-    [db.accounts, db.categories, db.transactions, db.recurring, db.settings, db.incomeSources, db.incomeOverrides],
+    [
+      db.accounts,
+      db.categories,
+      db.transactions,
+      db.recurring,
+      db.settings,
+      db.incomeSources,
+      db.incomeOverrides,
+      db.incomePayments,
+    ],
     async () => {
       await db.accounts.clear()
       await db.categories.clear()
@@ -61,6 +74,7 @@ export async function importBackup(file: File): Promise<{ transactions: number }
       await db.settings.clear()
       await db.incomeSources.clear()
       await db.incomeOverrides.clear()
+      await db.incomePayments.clear()
       await db.accounts.bulkAdd(accounts as never)
       await db.categories.bulkAdd(categories as never)
       await db.transactions.bulkAdd(transactions as never)
@@ -68,6 +82,7 @@ export async function importBackup(file: File): Promise<{ transactions: number }
       await db.settings.bulkAdd(settings as never)
       if (incomeSources) await db.incomeSources.bulkAdd(incomeSources as never)
       if (incomeOverrides) await db.incomeOverrides.bulkAdd(incomeOverrides as never)
+      if (incomePayments) await db.incomePayments.bulkAdd(incomePayments as never)
     },
   )
   return { transactions: (transactions as unknown[]).length }

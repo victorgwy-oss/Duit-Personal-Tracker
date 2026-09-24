@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, DEFAULT_SETTINGS } from '../db'
-import type { Account, Category, IncomeSource, IncomeOverride } from '../lib/types'
+import type { Account, Category, IncomeSource, IncomeOverride, IncomePayment } from '../lib/types'
 
 export function useSettings() {
   return useLiveQuery(async () => {
@@ -60,6 +60,13 @@ export function useIncomeSources(): IncomeSource[] | undefined {
 export function useIncomeOverrides(): IncomeOverride[] | undefined {
   return useLiveQuery(
     () => db.incomeOverrides.filter((o) => !o.deleted).toArray(),
+    [],
+  )
+}
+
+export function useIncomePayments(): IncomePayment[] | undefined {
+  return useLiveQuery(
+    () => db.incomePayments.filter((p) => !p.deleted).toArray(),
     [],
   )
 }

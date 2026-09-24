@@ -3,6 +3,7 @@ import {
   useAccounts,
   useCategories,
   useIncomeOverrides,
+  useIncomePayments,
   useIncomeSources,
   useRecurring,
   useSettings,
@@ -37,10 +38,15 @@ export default function Dashboard({ onScan }: { onScan: () => void }) {
   const recurring = useRecurring()
   const incomeSources = useIncomeSources()
   const incomeOverrides = useIncomeOverrides()
+  const incomePayments = useIncomePayments()
 
   const cycleIncome = useMemo(
-    () => resolveIncome(incomeSources ?? [], incomeOverrides ?? [], cycle?.key ?? '').total,
-    [incomeSources, incomeOverrides, cycle],
+    () =>
+      resolveIncome(incomeSources ?? [], incomeOverrides ?? [], cycle?.key ?? '', incomePayments ?? [], {
+        start: startISO,
+        end: endISO,
+      }).total,
+    [incomeSources, incomeOverrides, incomePayments, cycle, startISO, endISO],
   )
 
   const data = useMemo(() => {

@@ -7,8 +7,11 @@ import type {
   Transaction,
   IncomeSource,
   IncomeOverride,
+  IncomePayment,
 } from './types'
 import { overrideId } from './income'
+import { getCycle, shiftCycle } from './cycle'
+import { fromISO } from './format'
 import { queuePush } from './sync'
 
 // All writes funnel through here so we can (a) stamp updatedAt, (b) soft-delete
@@ -122,17 +125,92 @@ export async function deleteRecurring(id: string): Promise<void> {
 export async function upsertIncomeSource(
   input: Partial<IncomeSource> & { name: string; defaultAmount: number; color: string },
 ): Promise<IncomeSource> {
+  const existing = input.id ? await db.incomeSources.get(input.id) : undefined
   const src: IncomeSource = {
     id: input.id ?? uid(),
     name: input.name,
     defaultAmount: input.defaultAmount,
     color: input.color,
     active: input.active ?? true,
+    // Keep the payment-tracking flag unless explicitly changed.
+    trackPayments: input.trackPayments ?? existing?.trackPayments,
     updatedAt: now(),
   }
   await db.incomeSources.put(src)
   queuePush('incomeSources', src)
   return src
+}
+
+// Switch a stream between a fixed monthly figure and logged payments. Tracked
+// streams ignore the default, so when turning tracking on we first write the
+// default into every month up to and including this one that was relying on
+// it — history stays exactly as it displayed, and this month's running figure
+// becomes the opening amount that new payments add to. Future months start
+// from zero and build up from payments.
+export async function setTrackPayments(sourceId: string, on: boolean): Promise<void> {
+  const src = await db.incomeSources.get(sourceId)
+  if (!src || !!src.trackPayments === on) return
+
+  if (on && src.defaultAmount > 0) {
+    const settings = await db.settings.get('singleton')
+    const startDay = settings?.cycleStartDay ?? 1
+    const current = getCycle(startDay)
+    const first = await db.transactions.orderBy('date').first()
+    let c = first ? getCycle(startDay, fromISO(first.date)) : current
+    if (c.key > current.key) c = current
+    for (let guard = 0; c.key <= current.key && guard < 240; guard++) {
+      const existing = await db.incomeOverrides.get(overrideId(sourceId, c.key))
+      if (!existing || existing.deleted) await setIncomeOverride(sourceId, c.key, src.defaultAmount)
+      c = shiftCycle(c, startDay, 1)
+    }
+  }
+
+  const updated: IncomeSource = { ...src, trackPayments: on, updatedAt: now() }
+  await db.incomeSources.put(updated)
+  queuePush('incomeSources', updated)
+}
+
+// ---- Income payments ----
+export async function addIncomePayment(input: {
+  sourceId: string
+  date: string
+  amount: number
+  note?: string
+}): Promise<IncomePayment> {
+  // Logging a payment implies the stream is payment-tracked.
+  await setTrackPayments(input.sourceId, true)
+  const t = now()
+  const row: IncomePayment = {
+    id: uid(),
+    sourceId: input.sourceId,
+    date: input.date,
+    amount: input.amount,
+    note: input.note?.trim() ?? '',
+    createdAt: t,
+    updatedAt: t,
+  }
+  await db.incomePayments.put(row)
+  queuePush('incomePayments', row)
+  return row
+}
+
+export async function updateIncomePayment(
+  id: string,
+  patch: Partial<Pick<IncomePayment, 'date' | 'amount' | 'note'>>,
+): Promise<void> {
+  const existing = await db.incomePayments.get(id)
+  if (!existing) return
+  const updated: IncomePayment = { ...existing, ...patch, id, updatedAt: now() }
+  await db.incomePayments.put(updated)
+  queuePush('incomePayments', updated)
+}
+
+export async function deleteIncomePayment(id: string): Promise<void> {
+  const existing = await db.incomePayments.get(id)
+  if (!existing) return
+  const updated: IncomePayment = { ...existing, deleted: true, updatedAt: now() }
+  await db.incomePayments.put(updated)
+  queuePush('incomePayments', updated)
 }
 
 export async function deleteIncomeSource(id: string): Promise<void> {

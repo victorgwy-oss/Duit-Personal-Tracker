@@ -92,6 +92,22 @@ export interface IncomeSource {
   defaultAmount: number
   color: string
   active: boolean
+  // Built from logged payments (e.g. business revenue) rather than a fixed
+  // monthly figure. Its month total = any amount set manually + payments.
+  trackPayments?: boolean
+  updatedAt: number
+  deleted?: boolean
+}
+
+// One payment received on a payment-tracked income stream — e.g. a client
+// paying an invoice. The stream's monthly income sums these automatically.
+export interface IncomePayment {
+  id: string
+  sourceId: string
+  date: string // ISO yyyy-mm-dd the money came in
+  amount: number
+  note: string // client / invoice reference (optional)
+  createdAt: number
   updatedAt: number
   deleted?: boolean
 }
