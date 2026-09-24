@@ -48,7 +48,11 @@ export default function Sheet({ open, onClose, title, children, full }: SheetPro
             <CloseIcon width={20} height={20} />
           </button>
         </div>
-        <div className="overflow-y-auto px-5 pb-6 no-scrollbar flex-1">{children}</div>
+        {/* Vertical scroll only: the sheet body never pans sideways. Rows that
+            need it (chip pickers) scroll horizontally inside themselves. */}
+        <div className="overflow-y-auto overflow-x-hidden overscroll-x-none px-5 pb-6 no-scrollbar flex-1">
+          {children}
+        </div>
       </div>
     </div>
   )

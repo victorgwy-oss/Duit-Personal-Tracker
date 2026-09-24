@@ -1,11 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import Sheet from '../components/Sheet'
 import Keypad, { applyAmountKey } from '../components/Keypad'
-import { useAccounts, useAllTransactions, useCategories, useIncomeSources } from '../hooks/useData'
-import { addIncomePayment, addTransaction } from '../lib/repo'
+import {
+  useAccounts,
+  useAllTransactions,
+  useCategories,
+  useIncomeOverrides,
+  useIncomePayments,
+  useIncomeSources,
+  useSettings,
+} from '../hooks/useData'
+import { addIncomePayment, addTransaction, setIncomeOverride } from '../lib/repo'
 import { orderCategoriesByUsage } from '../lib/categories'
 import { orderAccountsByUsage } from '../lib/wallets'
-import { todayISO, formatShortDate } from '../lib/format'
+import { resolveIncome } from '../lib/income'
+import { getCycle, cycleStartISO, cycleEndISO } from '../lib/cycle'
+import { todayISO, formatShortDate, formatMoney, fromISO } from '../lib/format'
 import type { Account, Category, IncomeSource } from '../lib/types'
 
 interface Props {
@@ -65,6 +75,23 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
     if (open && !sourceId && orderedSources[0]) setSourceId(orderedSources[0].id)
   }, [open, orderedAccounts, orderedCategories, orderedSources, accountId, categoryId, sourceId])
 
+  // Income: payment-logged streams (business) get a payment ADDED; fixed
+  // streams (salary, rent) get the month's amount SET — adding a "payment" to
+  // a fixed stream would double-count its regular amount.
+  const settings = useSettings()
+  const overrides = useIncomeOverrides()
+  const incomePayments = useIncomePayments()
+  const source = orderedSources.find((s) => s.id === sourceId)
+  const addsPayment = !!source?.trackPayments
+  const cycle = getCycle(settings?.cycleStartDay ?? 1, fromISO(date))
+  const monthName = cycle.label.split(' ')[0]
+  const currentForSource = source
+    ? resolveIncome([source], overrides ?? [], cycle.key, incomePayments ?? [], {
+        start: cycleStartISO(cycle),
+        end: cycleEndISO(cycle),
+      }).total
+    : 0
+
   const value = parseFloat(amount || '0')
   const canSave =
     value > 0 && !saving && (kind === 'expense' ? !!accountId && !!categoryId : !!sourceId)
@@ -86,8 +113,10 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
           note: note.trim(),
           source: 'manual',
         })
-      } else {
+      } else if (addsPayment) {
         await addIncomePayment({ sourceId, date, amount: value, note })
+      } else {
+        await setIncomeOverride(sourceId, cycle.key, value)
       }
       onClose()
     } finally {
@@ -115,7 +144,9 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
 
         {/* Amount display */}
         <div className="text-center">
-          <div className="text-ink-500 text-sm mb-1">{kind === 'expense' ? 'Amount' : 'Payment received'}</div>
+          <div className="text-ink-500 text-sm mb-1">
+            {kind === 'expense' ? 'Amount' : addsPayment ? 'Payment received' : `Amount for ${monthName}`}
+          </div>
           <div className={`text-5xl font-bold tabular-nums ${kind === 'income' ? 'text-good' : 'text-ink-100'}`}>
             <span className="text-2xl text-ink-500 align-top mr-1">RM</span>
             {amount || '0'}
@@ -131,19 +162,47 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
             <CategoryPicker categories={orderedCategories} value={categoryId} onChange={setCategoryId} />
           </>
         ) : (
-          <SourcePicker sources={orderedSources} value={sourceId} onChange={setSourceId} />
+          <div>
+            <SourcePicker sources={orderedSources} value={sourceId} onChange={setSourceId} />
+            {source && (
+              <p className="text-xs text-ink-500 mt-2 text-center">
+                {addsPayment
+                  ? `Adds a payment to ${source.name} for ${monthName} · ${formatMoney(currentForSource)} so far`
+                  : `Sets ${source.name} for ${monthName} · currently ${formatMoney(currentForSource)}`}
+              </p>
+            )}
+          </div>
         )}
 
-        {/* Note + date */}
+        {/* Note + date. A fixed income stream stores one amount per month, so
+            it has no note — the date just picks the month. */}
         <div className="flex gap-2">
-          <input
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder={kind === 'expense' ? 'Note (optional)' : 'Client / invoice (optional)'}
-            className="flex-1 bg-ink-800 border border-ink-700 rounded-xl px-3 py-2.5 text-sm text-ink-100 placeholder:text-ink-500 focus:outline-none focus:border-brand-500"
-          />
-          <label className="relative bg-ink-800 border border-ink-700 rounded-xl px-3 py-2.5 text-sm text-ink-300 flex items-center gap-2 cursor-pointer">
-            {date === todayISO() ? 'Today' : formatShortDate(date)}
+          {(kind === 'expense' || addsPayment) && (
+            <input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder={kind === 'expense' ? 'Note (optional)' : 'Client / invoice (optional)'}
+              className="flex-1 min-w-0 bg-ink-800 border border-ink-700 rounded-xl px-3 py-2.5 text-sm text-ink-100 placeholder:text-ink-500 focus:outline-none focus:border-brand-500"
+            />
+          )}
+          {/* overflow-hidden keeps the invisible date input inside this pill —
+              iOS gives date inputs a min-width wider than "Today", which
+              otherwise pokes past the screen edge and lets the sheet pan. */}
+          <label
+            className={`relative overflow-hidden bg-ink-800 border border-ink-700 rounded-xl px-3 py-2.5 text-sm text-ink-300 flex items-center gap-2 cursor-pointer shrink-0 ${
+              kind === 'income' && !addsPayment ? 'flex-1 justify-between' : ''
+            }`}
+          >
+            {kind === 'income' && !addsPayment ? (
+              <>
+                <span className="text-ink-500">Month</span>
+                <span>{cycle.label}</span>
+              </>
+            ) : date === todayISO() ? (
+              'Today'
+            ) : (
+              formatShortDate(date)
+            )}
             <input
               type="date"
               value={date}
@@ -162,7 +221,13 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
           disabled={!canSave}
           className="w-full py-4 rounded-2xl bg-brand-500 text-ink-950 font-semibold text-lg disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.99] transition"
         >
-          {saving ? 'Saving…' : kind === 'expense' ? 'Save expense' : 'Save income'}
+          {saving
+            ? 'Saving…'
+            : kind === 'expense'
+              ? 'Save expense'
+              : addsPayment
+                ? 'Save income'
+                : `Set for ${monthName}`}
         </button>
       </div>
     </Sheet>
