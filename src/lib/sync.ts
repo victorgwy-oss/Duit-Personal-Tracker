@@ -1,4 +1,5 @@
 import { db, ensureSeeded, wipeLocalData } from '../db'
+import { dropSent, latestPerRow, localOnlyRecurringDupes, planReconcile, type QueuedChange, type Stamp } from './syncPlan'
 import { supabase } from './supabase'
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isOnlineMode } from './config'
 
@@ -100,18 +101,17 @@ const WATERMARK_PREFIX = 'duit_sync_watermark:'
 // any realistic device clock skew; the re-fetched slice is tiny at this scale.
 const PULL_SKEW_WINDOW_MS = 2 * 24 * 60 * 60 * 1000 // 2 days
 
-interface QueuedChange { table: SyncTable; row: any }
-
 function loadQueue(): QueuedChange[] {
   try { return JSON.parse(localStorage.getItem(QUEUE_KEY) ?? '[]') } catch { return [] }
 }
 function saveQueue(q: QueuedChange[]) { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)) }
 
-// Called by repo on every local write.
+// Called by repo on every local write. Each write gets its own id so a flush
+// can remove exactly the writes it uploaded.
 export function queuePush(table: SyncTable, row: unknown) {
   if (!isOnlineMode) return
   const q = loadQueue()
-  q.push({ table, row })
+  q.push({ table, row, qid: crypto.randomUUID() })
   saveQueue(q)
   scheduleFlush()
 }
@@ -167,22 +167,29 @@ function scheduleFlush() {
 
 export async function flushQueue(): Promise<void> {
   if (!supabase || !userId) return
-  let q = loadQueue()
+  const q = loadQueue()
   if (q.length === 0) return
-  // Group by table and upsert.
-  const remaining: QueuedChange[] = []
+  // Tag writes queued before ids existed. Synchronous, so nothing can be
+  // queued in between.
+  let tagged = false
+  for (const c of q) if (!c.qid) { c.qid = crypto.randomUUID(); tagged = true }
+  if (tagged) saveQueue(q)
+
+  const sent = new Set<string>()
   for (const table of TABLE_ORDER) {
     const items = q.filter((c) => c.table === table)
     if (items.length === 0) continue
     const cfg = TABLES[table]
-    const rows = items.map((c) => cfg.toRemote(c.row, userId!))
+    // Latest version of each row only: an upsert touching a row twice fails whole.
+    const rows = latestPerRow(items).map((c) => cfg.toRemote(c.row, userId!))
     const { error } = await supabase.from(cfg.remote).upsert(rows)
-    if (error) {
-      console.warn('sync push failed', table, error.message)
-      remaining.push(...items) // keep for retry
-    }
+    if (error) console.warn('sync push failed', table, error.message) // stays queued for retry
+    else for (const c of items) sent.add(c.qid!)
   }
-  saveQueue(remaining)
+  // Re-read the queue rather than saving the snapshot back: writes made while
+  // we were uploading must survive. (Saving the snapshot silently dropped them —
+  // an expense logged mid-upload stayed on the phone but never reached the cloud.)
+  saveQueue(dropSent(loadQueue(), sent))
 }
 
 // --- Pull remote changes into the local store ---
@@ -252,28 +259,78 @@ export function whenInitialSyncDone(): Promise<boolean> {
   return initialSync
 }
 
-// Wallets the cloud rejected (the original accounts.type check allowed only
-// 'ewallet'/'card', so Cash and Bank Transfer failed) were never retried. After
-// syncing, upload any local wallet the cloud doesn't have — skipping any whose
-// name already exists there under another id, so this can't create duplicates.
-let walletsHealed = false
-async function pushMissingWallets(): Promise<void> {
-  if (!supabase || !userId || walletsHealed) return
-  const { data, error } = await supabase.from('accounts').select('id,name')
-  if (error) return
-  const ids = new Set((data ?? []).map((r: any) => r.id))
-  const names = new Set((data ?? []).map((r: any) => String(r.name).trim().toLowerCase()))
-  const missing = (await db.accounts.toArray()).filter(
-    (a) => !ids.has(a.id) && !names.has(a.name.trim().toLowerCase()),
-  )
-  if (missing.length > 0) {
-    const { error: pushError } = await supabase
-      .from('accounts')
-      .upsert(missing.map((a) => TABLES.accounts.toRemote(a, userId!)))
-    // Before migration 0007 the cloud still rejects these; try again next sync.
-    if (pushError) return console.warn('wallet repair failed', pushError.message)
+// Full check, run when the app opens: compare every row with the cloud and
+// exchange whichever side is newer (see planReconcile). The incremental pull and
+// upload queue are fast but can miss things — a write dropped from the queue,
+// a deletion that slipped past a device's sync cursor, a wallet the cloud once
+// rejected. This makes every device converge on the newest version regardless.
+// Settings is a single row the normal sync already handles.
+const RECONCILE_CHUNK = 100 // ids per fetch / rows per upload request
+
+async function reconcile(): Promise<void> {
+  if (!supabase || !userId) return
+  for (const table of TABLE_ORDER) {
+    if (table === 'settings') continue
+    const cfg = TABLES[table]
+    const named = table === 'accounts' || table === 'categories'
+
+    // What the cloud holds: id + version (+ name for duplicate protection).
+    const remote: Stamp[] = []
+    let readOk = true
+    for (let from = 0; ; from += PULL_PAGE) {
+      const { data, error } = await supabase
+        .from(cfg.remote)
+        .select(named ? 'id,updated_at,name' : 'id,updated_at')
+        .order('id', { ascending: true })
+        .range(from, from + PULL_PAGE - 1)
+      if (error) {
+        console.warn('reconcile read failed', table, error.message)
+        readOk = false
+        break
+      }
+      for (const r of (data ?? []) as any[]) remote.push({ id: r.id, updatedAt: num(r.updated_at), name: r.name })
+      if (!data || data.length < PULL_PAGE) break
+    }
+    if (!readOk) continue // never act on a partial picture of the cloud
+
+    const localRows: any[] = await cfg.dexie().toArray()
+    const plan = planReconcile(
+      localRows.map((r) => ({ id: r.id, updatedAt: num(r.updatedAt), name: r.name })),
+      remote,
+      named,
+    )
+
+    const byId = new Map(localRows.map((r) => [r.id, r]))
+    if (table === 'transactions') {
+      // Local-only duplicates of a recurring charge (e.g. left by a stale app
+      // build) are marked deleted rather than uploaded as live charges.
+      const remoteIds = new Set(remote.map((r) => r.id))
+      const now = Date.now()
+      for (const id of localOnlyRecurringDupes(localRows, remoteIds)) {
+        const row = { ...byId.get(id), deleted: true, updatedAt: now }
+        byId.set(id, row)
+        await cfg.dexie().put(row)
+      }
+    }
+    for (let i = 0; i < plan.push.length; i += RECONCILE_CHUNK) {
+      const rows = plan.push.slice(i, i + RECONCILE_CHUNK).map((id) => cfg.toRemote(byId.get(id), userId!))
+      const { error } = await supabase.from(cfg.remote).upsert(rows)
+      if (error) console.warn('reconcile push failed', table, error.message)
+    }
+    for (let i = 0; i < plan.fetch.length; i += RECONCILE_CHUNK) {
+      const ids = plan.fetch.slice(i, i + RECONCILE_CHUNK)
+      const { data, error } = await supabase.from(cfg.remote).select('*').in('id', ids)
+      if (error) {
+        console.warn('reconcile fetch failed', table, error.message)
+        continue
+      }
+      for (const remoteRow of data ?? []) {
+        const incoming = cfg.fromRemote(remoteRow)
+        const existing = await cfg.dexie().get(incoming.id)
+        if (!existing || num(existing.updatedAt) <= incoming.updatedAt) await cfg.dexie().put(incoming)
+      }
+    }
   }
-  walletsHealed = true
 }
 
 // Push every local row up (first-device bootstrap). Idempotent upserts.
@@ -311,7 +368,7 @@ export async function bootstrap(): Promise<void> {
       await pushAllLocal()     // …and populate the cloud from this device
     } else {
       await flushQueue()       // adopt remote, then push any local edits
-      await pushMissingWallets()
+      await reconcile()        // repair anything the incremental sync missed
     }
     // Startup writes depend on these being current.
     ok = !failed.has('transactions') && !failed.has('recurring') && !failed.has('incomeSources')
@@ -334,7 +391,6 @@ export async function syncNow(): Promise<void> {
   try {
     await flushQueue()
     await pull()
-    await pushMissingWallets()
     syncState.lastSyncAt = Date.now()
     syncState.error = ''
   } catch (e) {
