@@ -199,8 +199,13 @@ function setWatermark(table: SyncTable, v: number) {
   localStorage.setItem(WATERMARK_PREFIX + table, String(v))
 }
 
-export async function pull(): Promise<void> {
-  if (!supabase || !userId) return
+// Supabase returns at most 1000 rows per request, so pulls page through.
+const PULL_PAGE = 1000
+
+// Returns the tables that failed to pull (empty = everything came down).
+export async function pull(): Promise<Set<SyncTable>> {
+  const failed = new Set<SyncTable>()
+  if (!supabase || !userId) return new Set(TABLE_ORDER)
   for (const table of TABLE_ORDER) {
     const cfg = TABLES[table]
     const wm = getWatermark(table)
@@ -208,24 +213,43 @@ export async function pull(): Promise<void> {
     // cursor are still fetched. maxSeen still advances to the true maximum.
     const since = Math.max(0, wm - PULL_SKEW_WINDOW_MS)
     let maxSeen = wm
-    const { data, error } = await supabase
-      .from(cfg.remote)
-      .select('*')
-      .gt('updated_at', since)
-      .order('updated_at', { ascending: true })
-    if (error) { console.warn('sync pull failed', table, error.message); continue }
-    if (!data || data.length === 0) continue
     const dexieTable = cfg.dexie()
-    for (const remoteRow of data) {
-      const local = cfg.fromRemote(remoteRow)
-      const existing = await dexieTable.get(local.id)
-      if (!existing || num(existing.updatedAt) <= local.updatedAt) {
-        await dexieTable.put(local)
+    // A device that's been away a while can have more than one page to catch up.
+    for (let from = 0; ; from += PULL_PAGE) {
+      let q = supabase.from(cfg.remote).select('*').gt('updated_at', since).order('updated_at', { ascending: true })
+      if (table !== 'settings') q = q.order('id', { ascending: true }) // stable paging on ties
+      const { data, error } = await q.range(from, from + PULL_PAGE - 1)
+      if (error) {
+        console.warn('sync pull failed', table, error.message)
+        failed.add(table)
+        break
       }
-      if (local.updatedAt > maxSeen) maxSeen = local.updatedAt
+      for (const remoteRow of data ?? []) {
+        const local = cfg.fromRemote(remoteRow)
+        const existing = await dexieTable.get(local.id)
+        if (!existing || num(existing.updatedAt) <= local.updatedAt) {
+          await dexieTable.put(local)
+        }
+        if (local.updatedAt > maxSeen) maxSeen = local.updatedAt
+      }
+      if (!data || data.length < PULL_PAGE) break
     }
-    if (maxSeen > wm) setWatermark(table, maxSeen)
+    // Don't advance the cursor past a partial read; the next pull retries it.
+    if (!failed.has(table) && maxSeen > wm) setWatermark(table, maxSeen)
   }
+  return failed
+}
+
+// Resolves once this session's first sync has finished: true if the data the
+// startup writes depend on came down, false if not (e.g. offline). Auto-posting
+// recurring charges and seeding wait for this, so they work from the latest
+// cloud data — not a stale local copy that could re-record charges another
+// device already posted. Local-only mode has nothing to wait for.
+let settleInitialSync!: (ok: boolean) => void
+const initialSync = new Promise<boolean>((resolve) => (settleInitialSync = resolve))
+if (!isOnlineMode) settleInitialSync(true)
+export function whenInitialSyncDone(): Promise<boolean> {
+  return initialSync
 }
 
 // Push every local row up (first-device bootstrap). Idempotent upserts.
@@ -247,16 +271,25 @@ export async function bootstrap(): Promise<void> {
   bootstrapped = true
   syncState.syncing = true
   emit()
+  let ok = false
   try {
     await adoptUser(userId)  // clear a previous account's local cache if switching
-    await pull() // fetch anything already in the cloud first
-    const remoteHasData = (await db.accounts.count()) > 0
+    const failed = await pull() // fetch anything already in the cloud first
+    // Only a genuinely empty account is "new". Missing wallets alone (e.g. rows
+    // an old database constraint rejected) must not trigger seeding, or this
+    // device would push a duplicate set of default categories and wallets.
+    const remoteHasData =
+      (await db.accounts.count()) > 0 ||
+      (await db.categories.count()) > 0 ||
+      (await db.transactions.count()) > 0
     if (!remoteHasData) {
       await ensureSeeded()     // fresh account: create defaults locally…
       await pushAllLocal()     // …and populate the cloud from this device
     } else {
       await flushQueue()       // adopt remote, then push any local edits
     }
+    // Startup writes depend on these being current.
+    ok = !failed.has('transactions') && !failed.has('recurring') && !failed.has('incomeSources')
     syncState.lastSyncAt = Date.now()
     syncState.error = ''
   } catch (e) {
@@ -264,6 +297,7 @@ export async function bootstrap(): Promise<void> {
   } finally {
     syncState.syncing = false
     emit()
+    settleInitialSync(ok)
   }
 }
 

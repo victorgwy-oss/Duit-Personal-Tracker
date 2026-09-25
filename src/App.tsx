@@ -5,7 +5,7 @@ import { ensureIncomeSeeded } from './db'
 import { runAutoPost } from './lib/autopost'
 import { isOnlineMode } from './lib/config'
 import { getSession, onAuthChange } from './lib/supabase'
-import { setUser, bootstrap, startAutoSync } from './lib/sync'
+import { setUser, bootstrap, startAutoSync, whenInitialSyncDone } from './lib/sync'
 import Auth from './screens/Auth'
 import { HomeIcon, ListIcon, RepeatIcon, GearIcon, PlusIcon, CameraIcon, ChartIcon } from './components/icons'
 import Dashboard from './screens/Dashboard'
@@ -46,13 +46,22 @@ export default function App() {
     return onAuthChange(apply)
   }, [])
 
-  // Post any due recurring charges the moment the app opens (mirrors the
-  // server-side cron). Runs after data is ready. Also migrate the legacy single
-  // income figure into an income stream the first time.
+  // Post any due recurring charges when the app opens (mirrors the server-side
+  // cron), and migrate the legacy single income figure into a stream the first
+  // time. Both WRITE data, so they wait for this session's first sync: run from
+  // a stale local copy, they re-recorded charges another device had already
+  // posted. If that sync fails (e.g. offline) they're skipped — the server cron
+  // still posts charges, and the next open catches up.
   useEffect(() => {
-    if (settings?.onboarded) {
+    if (!settings?.onboarded) return
+    let cancelled = false
+    whenInitialSyncDone().then((ok) => {
+      if (cancelled || !ok) return
       runAutoPost()
       ensureIncomeSeeded()
+    })
+    return () => {
+      cancelled = true
     }
   }, [settings?.onboarded])
 
