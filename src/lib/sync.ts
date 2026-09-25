@@ -252,6 +252,30 @@ export function whenInitialSyncDone(): Promise<boolean> {
   return initialSync
 }
 
+// Wallets the cloud rejected (the original accounts.type check allowed only
+// 'ewallet'/'card', so Cash and Bank Transfer failed) were never retried. After
+// syncing, upload any local wallet the cloud doesn't have — skipping any whose
+// name already exists there under another id, so this can't create duplicates.
+let walletsHealed = false
+async function pushMissingWallets(): Promise<void> {
+  if (!supabase || !userId || walletsHealed) return
+  const { data, error } = await supabase.from('accounts').select('id,name')
+  if (error) return
+  const ids = new Set((data ?? []).map((r: any) => r.id))
+  const names = new Set((data ?? []).map((r: any) => String(r.name).trim().toLowerCase()))
+  const missing = (await db.accounts.toArray()).filter(
+    (a) => !ids.has(a.id) && !names.has(a.name.trim().toLowerCase()),
+  )
+  if (missing.length > 0) {
+    const { error: pushError } = await supabase
+      .from('accounts')
+      .upsert(missing.map((a) => TABLES.accounts.toRemote(a, userId!)))
+    // Before migration 0007 the cloud still rejects these; try again next sync.
+    if (pushError) return console.warn('wallet repair failed', pushError.message)
+  }
+  walletsHealed = true
+}
+
 // Push every local row up (first-device bootstrap). Idempotent upserts.
 async function pushAllLocal(): Promise<void> {
   if (!supabase || !userId) return
@@ -287,6 +311,7 @@ export async function bootstrap(): Promise<void> {
       await pushAllLocal()     // …and populate the cloud from this device
     } else {
       await flushQueue()       // adopt remote, then push any local edits
+      await pushMissingWallets()
     }
     // Startup writes depend on these being current.
     ok = !failed.has('transactions') && !failed.has('recurring') && !failed.has('incomeSources')
@@ -309,6 +334,7 @@ export async function syncNow(): Promise<void> {
   try {
     await flushQueue()
     await pull()
+    await pushMissingWallets()
     syncState.lastSyncAt = Date.now()
     syncState.error = ''
   } catch (e) {
