@@ -203,3 +203,32 @@ export function describeCover(c: { months: number; days: number }): string {
   const m = c.months >= 10 ? Math.floor(c.months) : Math.floor(c.months * 2) / 2
   return `${m % 1 === 0 ? m : m.toFixed(1)} months`
 }
+
+// ---- Pockets inside buckets ----
+
+export type AssetEntry = { type: 'single'; asset: Asset } | { type: 'group'; name: string; members: Asset[] }
+
+// Lay out a section: items sharing "Part of" sit together under one heading.
+// An item whose NAME matches a group joins it too, so an existing "Eastspring"
+// entry becomes the first pocket once a fund is added "part of Eastspring".
+export function arrangeAssets(items: Asset[], groupKeys: Set<string>): AssetEntry[] {
+  const out: AssetEntry[] = []
+  const byKey = new Map<string, Extract<AssetEntry, { type: 'group' }>>()
+  for (const a of items) {
+    const g = a.group?.trim()
+    const key = g ? g.toLowerCase() : groupKeys.has(a.name.trim().toLowerCase()) ? a.name.trim().toLowerCase() : null
+    if (!key) {
+      out.push({ type: 'single', asset: a })
+      continue
+    }
+    let entry = byKey.get(key)
+    if (!entry) {
+      entry = { type: 'group', name: g || a.name.trim(), members: [] }
+      byKey.set(key, entry)
+      out.push(entry)
+    }
+    if (g && entry.name === a.name.trim()) entry.name = g
+    entry.members.push(a)
+  }
+  return out
+}

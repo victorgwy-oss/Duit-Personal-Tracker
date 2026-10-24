@@ -88,8 +88,14 @@ const TABLES: Record<SyncTable, TableConfig> = {
   assets: {
     remote: 'assets',
     dexie: () => db.assets,
-    toRemote: (r, uid) => ({ id: r.id, user_id: uid, name: r.name, kind: r.kind, amount: r.amount, as_of: r.asOf, monthly_add: r.monthlyAdd ?? null, add_day: r.addDay ?? null, add_since: r.addSince ?? null, in_safety_net: !!r.inSafetyNet, color: r.color, updated_at: r.updatedAt, deleted: !!r.deleted }),
-    fromRemote: (x) => ({ id: x.id, name: x.name, kind: x.kind, amount: num(x.amount), asOf: x.as_of, monthlyAdd: x.monthly_add == null ? undefined : num(x.monthly_add), addDay: x.add_day ?? undefined, addSince: x.add_since ?? undefined, inSafetyNet: !!x.in_safety_net, color: x.color, updatedAt: num(x.updated_at), deleted: !!x.deleted }),
+    toRemote: (r, uid) => {
+      const row: any = { id: r.id, user_id: uid, name: r.name, kind: r.kind, amount: r.amount, as_of: r.asOf, monthly_add: r.monthlyAdd ?? null, add_day: r.addDay ?? null, add_since: r.addSince ?? null, in_safety_net: !!r.inSafetyNet, color: r.color, updated_at: r.updatedAt, deleted: !!r.deleted }
+      // Only send group_name once used, so sync keeps working on a database
+      // that ran the first version of 0008 (before the column existed).
+      if (r.group) row.group_name = r.group
+      return row
+    },
+    fromRemote: (x) => ({ id: x.id, name: x.name, kind: x.kind, amount: num(x.amount), asOf: x.as_of, monthlyAdd: x.monthly_add == null ? undefined : num(x.monthly_add), addDay: x.add_day ?? undefined, addSince: x.add_since ?? undefined, inSafetyNet: !!x.in_safety_net, group: x.group_name ?? undefined, color: x.color, updatedAt: num(x.updated_at), deleted: !!x.deleted }),
   },
   wellbeing: {
     remote: 'wellbeing',

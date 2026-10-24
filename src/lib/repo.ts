@@ -262,6 +262,7 @@ export async function saveAsset(input: {
   monthlyAdd?: number
   addDay?: number
   inSafetyNet?: boolean
+  group?: string
   color: string
 }): Promise<Asset> {
   const today = todayISO()
@@ -294,6 +295,7 @@ export async function saveAsset(input: {
     addDay,
     addSince,
     inSafetyNet: input.kind === 'investment' ? !!input.inSafetyNet : undefined,
+    group: input.group?.trim() || undefined,
     color: input.color,
     updatedAt: now(),
   }

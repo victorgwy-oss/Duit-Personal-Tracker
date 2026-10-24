@@ -116,6 +116,7 @@ export interface Asset {
   addDay?: number // day of the month it goes in (1–31)
   addSince?: string // ISO date contributions start counting (for the history)
   inSafetyNet?: boolean // an investment you could reach in an emergency (savings always count)
+  group?: string // what it's part of, e.g. several funds under "Eastspring"
   color: string
   updatedAt: number
   deleted?: boolean

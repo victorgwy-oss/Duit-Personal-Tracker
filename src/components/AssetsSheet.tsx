@@ -3,7 +3,7 @@ import Sheet from './Sheet'
 import AmountField from './AmountField'
 import { useAssets, useSettings } from '../hooks/useData'
 import { deleteAsset, saveAsset, setAssetValue } from '../lib/repo'
-import { assetValue, summarizeWorth } from '../lib/wins'
+import { arrangeAssets, assetValue, summarizeWorth } from '../lib/wins'
 import { formatMoney, formatShortDate } from '../lib/format'
 import type { Asset, AssetKind } from '../lib/types'
 
@@ -40,7 +40,9 @@ const POCKETS: { name: string; kind: AssetKind }[] = [
   { name: 'Public Mutual PRS', kind: 'investment' },
 ]
 
-type Editing = { asset: Asset | null; preset?: { name: string; kind: AssetKind } }
+type Preset = { name: string; kind: AssetKind; group?: string }
+type Editing = { asset: Asset | null; preset?: Preset }
+
 
 // Your net worth, built from what you own and what's growing. Tap any amount to
 // update it; automatic monthly contributions add themselves.
@@ -51,8 +53,16 @@ export default function AssetsSheet({ open, onClose }: { open: boolean; onClose:
   const [editing, setEditing] = useState<Editing | null>(null)
 
   const worth = summarizeWorth(assets ?? [])
-  const have = new Set((assets ?? []).map((a) => a.name.trim().toLowerCase()))
+  const groupKeys = new Set((assets ?? []).map((a) => a.group?.trim().toLowerCase()).filter((g): g is string => !!g))
+  const have = new Set([...(assets ?? []).map((a) => a.name.trim().toLowerCase()), ...groupKeys])
   const suggestions = POCKETS.filter((p) => !have.has(p.name.toLowerCase()))
+  const groupNames = [
+    ...new Set(
+      (assets ?? [])
+        .flatMap((a) => (a.group ? [a.group.trim()] : a.kind !== 'debt' ? [a.name.trim()] : []))
+        .filter(Boolean),
+    ),
+  ]
   const grouped = KINDS.map((k) => ({ kind: k, items: (assets ?? []).filter((a) => a.kind === k.value) })).filter(
     (g) => g.items.length > 0,
   )
@@ -83,28 +93,31 @@ export default function AssetsSheet({ open, onClose }: { open: boolean; onClose:
           <div key={kind.value}>
             <div className="text-xs font-semibold text-ink-400 uppercase tracking-wide mb-1.5">{kind.label}</div>
             <div className="space-y-2">
-              {items.map((a) => (
-                <div key={a.id} className="flex items-center gap-3 rounded-xl bg-ink-800 border border-ink-700 px-3 py-2.5">
-                  <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: a.color }} />
-                  <button onClick={() => setEditing({ asset: a })} className="flex-1 min-w-0 text-left">
-                    <div className="text-sm text-ink-100 truncate">{a.name}</div>
-                    <div className="text-[11px] text-ink-500 truncate">
-                      {a.monthlyAdd
-                        ? `+${formatMoney(a.monthlyAdd, currency)} on the ${ordinal(a.addDay ?? 1)} · `
-                        : ''}
-                      updated {formatShortDate(a.asOf)}
+              {arrangeAssets(items, groupKeys).map((e) =>
+                e.type === 'single' ? (
+                  <AssetRow key={e.asset.id} a={e.asset} currency={currency} onEdit={() => setEditing({ asset: e.asset })} />
+                ) : (
+                  <div key={`g:${e.name}`} className="rounded-xl border border-ink-700 bg-ink-800/40 p-2 space-y-2">
+                    <div className="flex items-center justify-between px-1">
+                      <span className="text-sm font-medium text-ink-100">{e.name}</span>
+                      <span className="text-sm tabular-nums text-ink-200">
+                        {formatMoney(e.members.reduce((s, m) => s + assetValue(m), 0), currency)}
+                      </span>
                     </div>
-                  </button>
-                  <AmountField
-                    value={assetValue(a)}
-                    onChange={(n) => setAssetValue(a.id, n)}
-                    currency={currency}
-                    compact
-                    className="w-36"
-                    title={`Update · ${a.name}`}
-                  />
-                </div>
-              ))}
+                    {e.members.map((m) => (
+                      <AssetRow key={m.id} a={m} currency={currency} onEdit={() => setEditing({ asset: m })} />
+                    ))}
+                    <button
+                      onClick={() =>
+                        setEditing({ asset: null, preset: { name: '', kind: e.members[0].kind, group: e.name } })
+                      }
+                      className="w-full text-xs text-brand-400 font-medium py-1"
+                    >
+                      + Add another pocket to {e.name}
+                    </button>
+                  </div>
+                ),
+              )}
             </div>
           </div>
         ))}
@@ -140,25 +153,63 @@ export default function AssetsSheet({ open, onClose }: { open: boolean; onClose:
       </p>
 
       {editing && (
-        <AssetEditor asset={editing.asset} preset={editing.preset} currency={currency} onClose={() => setEditing(null)} />
+        <AssetEditor
+          key={editing.asset?.id ?? `new:${editing.preset?.group ?? ''}:${editing.preset?.name ?? ''}`}
+          asset={editing.asset}
+          preset={editing.preset}
+          groupNames={groupNames}
+          currency={currency}
+          onClose={() => setEditing(null)}
+          onAddInside={(a) =>
+            setEditing({ asset: null, preset: { name: '', kind: a.kind, group: a.group?.trim() || a.name.trim() } })
+          }
+        />
       )}
     </Sheet>
+  )
+}
+
+function AssetRow({ a, currency, onEdit }: { a: Asset; currency: string; onEdit: () => void }) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl bg-ink-800 border border-ink-700 px-3 py-2.5">
+      <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: a.color }} />
+      <button onClick={onEdit} className="flex-1 min-w-0 text-left">
+        <div className="text-sm text-ink-100 truncate">{a.name}</div>
+        <div className="text-[11px] text-ink-500 truncate">
+          {a.monthlyAdd ? `+${formatMoney(a.monthlyAdd, currency)} on the ${ordinal(a.addDay ?? 1)} · ` : ''}
+          updated {formatShortDate(a.asOf)}
+        </div>
+      </button>
+      <AmountField
+        value={assetValue(a)}
+        onChange={(n) => setAssetValue(a.id, n)}
+        currency={currency}
+        compact
+        className="w-36"
+        title={`Update · ${a.name}`}
+      />
+    </div>
   )
 }
 
 function AssetEditor({
   asset,
   preset,
+  groupNames,
   currency,
   onClose,
+  onAddInside,
 }: {
   asset: Asset | null
-  preset?: { name: string; kind: AssetKind }
+  preset?: Preset
+  groupNames: string[]
   currency: string
   onClose: () => void
+  onAddInside: (a: Asset) => void
 }) {
   const [name, setName] = useState(asset?.name ?? preset?.name ?? '')
   const [kind, setKind] = useState<AssetKind>(asset?.kind ?? preset?.kind ?? 'savings')
+  const [group, setGroup] = useState(asset?.group ?? preset?.group ?? '')
   const [value, setValue] = useState(asset ? assetValue(asset) : 0)
   const [auto, setAuto] = useState(!!asset?.monthlyAdd)
   const [monthlyAdd, setMonthlyAdd] = useState(asset?.monthlyAdd ?? 0)
@@ -177,6 +228,7 @@ function AssetEditor({
       monthlyAdd: canAuto && auto ? monthlyAdd : 0,
       addDay,
       inSafetyNet,
+      group,
       color: asset && asset.kind === kind ? asset.color : k.color,
     })
     onClose()
@@ -208,9 +260,34 @@ function AssetEditor({
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder={k.placeholder}
+          placeholder={group ? `e.g. a fund inside ${group}` : k.placeholder}
           className="w-full bg-ink-800 border border-ink-700 rounded-xl px-3 py-2.5 text-ink-100 placeholder:text-ink-500 focus:outline-none focus:border-brand-500"
         />
+
+        {kind !== 'debt' && (
+          <div>
+            <div className="text-xs text-ink-400 mb-1.5">Part of (optional)</div>
+            <input
+              value={group}
+              onChange={(e) => setGroup(e.target.value)}
+              list="asset-groups"
+              placeholder="e.g. Boost bank, Eastspring"
+              className="w-full bg-ink-800 border border-ink-700 rounded-xl px-3 py-2.5 text-sm text-ink-100 placeholder:text-ink-500 focus:outline-none focus:border-brand-500"
+            />
+            <datalist id="asset-groups">
+              {groupNames
+                .filter((g) => g.toLowerCase() !== name.trim().toLowerCase())
+                .map((g) => (
+                  <option key={g} value={g} />
+                ))}
+            </datalist>
+            <p className="text-xs text-ink-500 mt-1.5">
+              Pockets with the same "Part of" show together with a subtotal, for example jars inside Boost or
+              funds inside Eastspring. Give each pocket its own amount (say, Boost's main balance without the
+              jars), so nothing is counted twice.
+            </p>
+          </div>
+        )}
 
         <div>
           <div className="text-xs text-ink-400 mb-1.5">{kind === 'debt' ? 'Amount still owed' : "What it's worth now"}</div>
@@ -272,6 +349,14 @@ function AssetEditor({
           {asset && (
             <button onClick={remove} className="px-4 py-3 rounded-xl border border-ink-700 text-ink-400 text-sm">
               Remove
+            </button>
+          )}
+          {asset && asset.kind !== 'debt' && (
+            <button
+              onClick={() => onAddInside(asset)}
+              className="px-3 py-3 rounded-xl border border-ink-700 text-brand-400 text-sm"
+            >
+              + Pocket inside
             </button>
           )}
           <button

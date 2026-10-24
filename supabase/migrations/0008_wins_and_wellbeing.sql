@@ -16,10 +16,14 @@ create table if not exists public.assets (
   add_day int,
   add_since date,
   in_safety_net boolean not null default false,
+  group_name text,
   color text not null default '#22c55e',
   updated_at bigint not null default 0,
   deleted boolean not null default false
 );
+
+-- Added after the first version of this file: safe to (re-)run either way.
+alter table public.assets add column if not exists group_name text;
 
 create table if not exists public.wellbeing (
   user_id uuid primary key references auth.users (id) on delete cascade,
