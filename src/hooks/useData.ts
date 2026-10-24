@@ -1,6 +1,23 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, DEFAULT_SETTINGS } from '../db'
-import type { Account, Category, IncomeSource, IncomeOverride, IncomePayment } from '../lib/types'
+import { DEFAULT_WELLBEING } from '../lib/repo'
+import type {
+  Account,
+  Asset,
+  Category,
+  IncomeSource,
+  IncomeOverride,
+  IncomePayment,
+  Wellbeing,
+} from '../lib/types'
+
+export function useAssets(): Asset[] | undefined {
+  return useLiveQuery(() => db.assets.filter((a) => !a.deleted).toArray(), [])
+}
+
+export function useWellbeing(): Wellbeing | undefined {
+  return useLiveQuery(async () => (await db.wellbeing.get('singleton')) ?? DEFAULT_WELLBEING, [])
+}
 
 export function useSettings() {
   return useLiveQuery(async () => {

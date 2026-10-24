@@ -14,6 +14,11 @@ export type SyncTable =
   | 'incomeSources'
   | 'incomeOverrides'
   | 'incomePayments'
+  | 'assets'
+  | 'wellbeing'
+
+// One row per user, keyed by user_id (no id column in the cloud).
+const SINGLETONS = new Set<SyncTable>(['settings', 'wellbeing'])
 
 // --- Table mapping between the local (camelCase) store and Postgres (snake_case) ---
 interface TableConfig {
@@ -80,6 +85,18 @@ const TABLES: Record<SyncTable, TableConfig> = {
     toRemote: (r, uid) => ({ id: r.id, user_id: uid, source_id: r.sourceId, month_key: r.monthKey, amount: r.amount, updated_at: r.updatedAt, deleted: !!r.deleted }),
     fromRemote: (x) => ({ id: x.id, sourceId: x.source_id, monthKey: x.month_key, amount: num(x.amount), updatedAt: num(x.updated_at), deleted: !!x.deleted }),
   },
+  assets: {
+    remote: 'assets',
+    dexie: () => db.assets,
+    toRemote: (r, uid) => ({ id: r.id, user_id: uid, name: r.name, kind: r.kind, amount: r.amount, as_of: r.asOf, monthly_add: r.monthlyAdd ?? null, add_day: r.addDay ?? null, add_since: r.addSince ?? null, in_safety_net: !!r.inSafetyNet, color: r.color, updated_at: r.updatedAt, deleted: !!r.deleted }),
+    fromRemote: (x) => ({ id: x.id, name: x.name, kind: x.kind, amount: num(x.amount), asOf: x.as_of, monthlyAdd: x.monthly_add == null ? undefined : num(x.monthly_add), addDay: x.add_day ?? undefined, addSince: x.add_since ?? undefined, inSafetyNet: !!x.in_safety_net, color: x.color, updatedAt: num(x.updated_at), deleted: !!x.deleted }),
+  },
+  wellbeing: {
+    remote: 'wellbeing',
+    dexie: () => db.wellbeing,
+    toRemote: (r, uid) => ({ user_id: uid, for_me_monthly: r.forMeMonthly, for_me_category_id: r.forMeCategoryId ?? null, emergency_label: r.emergencyLabel ?? '', emergency_amount: r.emergencyAmount, updated_at: r.updatedAt }),
+    fromRemote: (x) => ({ id: 'singleton', forMeMonthly: num(x.for_me_monthly), forMeCategoryId: x.for_me_category_id ?? undefined, emergencyLabel: x.emergency_label ?? '', emergencyAmount: num(x.emergency_amount), updatedAt: num(x.updated_at) }),
+  },
   incomePayments: {
     remote: 'income_payments',
     dexie: () => db.incomePayments,
@@ -88,7 +105,7 @@ const TABLES: Record<SyncTable, TableConfig> = {
   },
 }
 
-const TABLE_ORDER: SyncTable[] = ['settings', 'accounts', 'categories', 'recurring', 'transactions', 'incomeSources', 'incomeOverrides', 'incomePayments']
+const TABLE_ORDER: SyncTable[] = ['settings', 'accounts', 'categories', 'recurring', 'transactions', 'incomeSources', 'incomeOverrides', 'incomePayments', 'assets', 'wellbeing']
 
 // --- Offline write queue (survives reloads / offline) ---
 const QUEUE_KEY = 'duit_sync_queue'
@@ -224,7 +241,7 @@ export async function pull(): Promise<Set<SyncTable>> {
     // A device that's been away a while can have more than one page to catch up.
     for (let from = 0; ; from += PULL_PAGE) {
       let q = supabase.from(cfg.remote).select('*').gt('updated_at', since).order('updated_at', { ascending: true })
-      if (table !== 'settings') q = q.order('id', { ascending: true }) // stable paging on ties
+      if (!SINGLETONS.has(table)) q = q.order('id', { ascending: true }) // stable paging on ties
       const { data, error } = await q.range(from, from + PULL_PAGE - 1)
       if (error) {
         console.warn('sync pull failed', table, error.message)
@@ -270,7 +287,7 @@ const RECONCILE_CHUNK = 100 // ids per fetch / rows per upload request
 async function reconcile(): Promise<void> {
   if (!supabase || !userId) return
   for (const table of TABLE_ORDER) {
-    if (table === 'settings') continue
+    if (SINGLETONS.has(table)) continue
     const cfg = TABLES[table]
     const named = table === 'accounts' || table === 'categories'
 

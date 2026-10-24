@@ -8,6 +8,8 @@ import type {
   IncomeSource,
   IncomeOverride,
   IncomePayment,
+  Asset,
+  Wellbeing,
 } from './lib/types'
 
 // Local-first store. This is the single source the UI reads/writes.
@@ -22,6 +24,8 @@ export class FinanceDB extends Dexie {
   incomeSources!: Table<IncomeSource, string>
   incomeOverrides!: Table<IncomeOverride, string>
   incomePayments!: Table<IncomePayment, string>
+  assets!: Table<Asset, string>
+  wellbeing!: Table<Wellbeing, string>
 
   constructor() {
     super('duit-finance')
@@ -40,6 +44,12 @@ export class FinanceDB extends Dexie {
     // v3: individual payments on payment-tracked streams (e.g. client invoices).
     this.version(3).stores({
       incomePayments: 'id, sourceId, date, deleted',
+    })
+    // v4: the wins side — savings, investments and net worth — plus gentler-money
+    // preferences ("Just for me" fund, a past emergency to compare against).
+    this.version(4).stores({
+      assets: 'id, kind, deleted',
+      wellbeing: 'id',
     })
   }
 }
@@ -138,6 +148,8 @@ export async function wipeLocalData() {
       db.incomeSources,
       db.incomeOverrides,
       db.incomePayments,
+      db.assets,
+      db.wellbeing,
     ],
     async () => {
       await Promise.all([
@@ -149,6 +161,8 @@ export async function wipeLocalData() {
         db.incomeSources.clear(),
         db.incomeOverrides.clear(),
         db.incomePayments.clear(),
+        db.assets.clear(),
+        db.wellbeing.clear(),
       ])
     },
   )

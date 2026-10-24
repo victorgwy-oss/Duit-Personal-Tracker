@@ -10,6 +10,9 @@ import ManageLists from './ManageLists'
 import ImportStatement from './ImportStatement'
 import IncomeSheet from '../components/IncomeSheet'
 import BudgetSheet from '../components/BudgetSheet'
+import AssetsSheet from '../components/AssetsSheet'
+import WellbeingSheet from '../components/WellbeingSheet'
+import GroundingSheet from '../components/GroundingSheet'
 
 export default function SettingsScreen() {
   const settings = useSettings()
@@ -20,6 +23,9 @@ export default function SettingsScreen() {
   const [importOpen, setImportOpen] = useState(false)
   const [incomeOpen, setIncomeOpen] = useState(false)
   const [budgetOpen, setBudgetOpen] = useState(false)
+  const [assetsOpen, setAssetsOpen] = useState(false)
+  const [wellbeingOpen, setWellbeingOpen] = useState(false)
+  const [groundingOpen, setGroundingOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const [importMsg, setImportMsg] = useState('')
 
@@ -56,6 +62,30 @@ export default function SettingsScreen() {
         <h1 className="text-2xl font-bold text-ink-100">Settings</h1>
         {savedFlash && <span className="text-xs text-good">Saved ✓</span>}
       </div>
+
+      <Section title="Wins & wellbeing">
+        <button
+          onClick={() => setAssetsOpen(true)}
+          className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-ink-800 border border-ink-700 text-left"
+        >
+          <span className="text-sm text-ink-300">Net worth & savings</span>
+          <span className="text-sm text-brand-400">Manage →</span>
+        </button>
+        <button
+          onClick={() => setWellbeingOpen(true)}
+          className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-ink-800 border border-ink-700 text-left"
+        >
+          <span className="text-sm text-ink-300">Just for me & reassurance</span>
+          <span className="text-sm text-brand-400">Set up →</span>
+        </button>
+        <button
+          onClick={() => setGroundingOpen(true)}
+          className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-ink-800 border border-ink-700 text-left"
+        >
+          <span className="text-sm text-ink-300">Feeling broke?</span>
+          <span className="text-sm text-brand-400">See what's true →</span>
+        </button>
+      </Section>
 
       <Section title="Money">
         <button
@@ -169,6 +199,9 @@ export default function SettingsScreen() {
       <ImportStatement open={importOpen} onClose={() => setImportOpen(false)} />
       <IncomeSheet open={incomeOpen} onClose={() => setIncomeOpen(false)} />
       <BudgetSheet open={budgetOpen} onClose={() => setBudgetOpen(false)} />
+      <AssetsSheet open={assetsOpen} onClose={() => setAssetsOpen(false)} />
+      <WellbeingSheet open={wellbeingOpen} onClose={() => setWellbeingOpen(false)} />
+      <GroundingSheet open={groundingOpen} onClose={() => setGroundingOpen(false)} />
     </div>
   )
 }

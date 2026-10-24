@@ -9,7 +9,9 @@ import {
   useIncomePayments,
   useIncomeSources,
   useSettings,
+  useWellbeing,
 } from '../hooks/useData'
+import { forMeSpent } from '../lib/wins'
 import { addIncomePayment, addTransaction, setIncomeOverride, setTrackPayments } from '../lib/repo'
 import { orderCategoriesByUsage } from '../lib/categories'
 import { orderAccountsByUsage } from '../lib/wallets'
@@ -54,6 +56,9 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
   const [note, setNote] = useState('')
   const [date, setDate] = useState(todayISO())
   const [saving, setSaving] = useState(false)
+  // A short "well earned" moment after logging money that came in.
+  const [celebrate, setCelebrate] = useState<number | null>(null)
+  const wellbeing = useWellbeing()
   // For an income stream whose type was never chosen, the user picks once.
   const [pick, setPick] = useState<'add' | 'set' | null>(null)
 
@@ -62,6 +67,7 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
   useEffect(() => {
     if (!open) return
     setKind('expense')
+    setCelebrate(null)
     setAmount(prefill?.amount ? String(prefill.amount) : '')
     setNote(prefill?.note ?? '')
     setDate(prefill?.date ?? todayISO())
@@ -123,6 +129,13 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
         })
       } else if (action === 'add') {
         await addIncomePayment({ sourceId, date, amount: value, note }) // also marks the stream payment-logged
+        // Let the win land for a moment before closing.
+        setCelebrate(value)
+        setTimeout(() => {
+          setCelebrate(null)
+          onClose()
+        }, 1600)
+        return
       } else if (action === 'set') {
         await setIncomeOverride(sourceId, cycle.key, value)
         if (decided === undefined) await setTrackPayments(sourceId, false) // remember: fixed
@@ -132,6 +145,14 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
       setSaving(false)
     }
   }
+
+  // Logging something under "Just for me": remind that it's pre-approved.
+  const forMeId = wellbeing?.forMeCategoryId
+  const forMeFund = wellbeing?.forMeMonthly ?? 0
+  const forMeLeft =
+    kind === 'expense' && forMeId && categoryId === forMeId && forMeFund > 0
+      ? forMeFund - forMeSpent(txns ?? [], forMeId, cycleStartISO(cycle), cycleEndISO(cycle))
+      : null
 
   return (
     <Sheet open={open} onClose={onClose} title={kind === 'expense' ? 'Add expense' : 'Add income'} full>
@@ -173,6 +194,14 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
 
             {/* Category chips */}
             <CategoryPicker categories={orderedCategories} value={categoryId} onChange={setCategoryId} />
+            {forMeLeft !== null && (
+              <p className="text-xs text-pink-300 text-center -mt-2">
+                💛{' '}
+                {forMeLeft > 0
+                  ? `From your Just for me fund · ${formatMoney(forMeLeft)} left this month. It's already approved.`
+                  : "You've enjoyed this month's Just for me fund. Still yours to choose."}
+              </p>
+            )}
           </>
         ) : (
           <div>
@@ -273,6 +302,16 @@ export default function QuickAdd({ open, onClose, prefill }: Props) {
                   : `Set for ${monthName}`}
         </button>
       </div>
+
+      {celebrate !== null && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-ink-950/70 backdrop-blur-sm">
+          <div className="rounded-3xl bg-ink-900 border border-good/30 px-8 py-7 text-center shadow-2xl">
+            <div className="text-5xl mb-2">🎉</div>
+            <div className="text-2xl font-bold text-good tabular-nums">+{formatMoney(celebrate)}</div>
+            <div className="text-sm text-ink-300 mt-1">came in. Well earned.</div>
+          </div>
+        </div>
+      )}
     </Sheet>
   )
 }

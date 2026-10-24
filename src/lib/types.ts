@@ -99,6 +99,38 @@ export interface IncomeSource {
   deleted?: boolean
 }
 
+// Something you own (or owe) — savings, investments, property, a loan. Together
+// they make up your net worth: the "wins" side of the picture, shown alongside
+// spending. `amount` is the value you last entered; a monthly contribution (e.g.
+// an investment DCA) is added on automatically each month after `asOf`, so the
+// figure keeps growing on its own until you next correct it.
+export type AssetKind = 'savings' | 'investment' | 'property' | 'other' | 'debt'
+
+export interface Asset {
+  id: string
+  name: string
+  kind: AssetKind // 'savings' counts as your safety net; 'debt' is subtracted
+  amount: number // value as of `asOf` (what you last entered)
+  asOf: string // ISO date that amount was entered
+  monthlyAdd?: number // automatic monthly contribution, e.g. an investment DCA
+  addDay?: number // day of the month it goes in (1–31)
+  addSince?: string // ISO date contributions start counting (for the history)
+  inSafetyNet?: boolean // an investment you could reach in an emergency (savings always count)
+  color: string
+  updatedAt: number
+  deleted?: boolean
+}
+
+// Personal, gentler-money preferences. One row per user.
+export interface Wellbeing {
+  id: 'singleton'
+  forMeMonthly: number // pre-approved monthly "Just for me" amount (0 = off)
+  forMeCategoryId?: string // category whose spending draws from it
+  emergencyLabel: string // a past money emergency to compare against, e.g. "Gearbox"
+  emergencyAmount: number // what it cost (0 = not set)
+  updatedAt: number
+}
+
 // One payment received on a payment-tracked income stream — e.g. a client
 // paying an invoice. The stream's monthly income sums these automatically.
 export interface IncomePayment {

@@ -1,39 +1,75 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useAllTransactions, useLookups, useSettings } from '../hooks/useData'
+import {
+  useAllTransactions,
+  useAssets,
+  useIncomePayments,
+  useIncomeSources,
+  useLookups,
+  useSettings,
+} from '../hooks/useData'
 import { formatMoney, formatDayLabel, formatTime, todayISO } from '../lib/format'
+import { winsBetween, type Win } from '../lib/wins'
 import type { Account, Category, Transaction } from '../lib/types'
 import { CloseIcon, ChevronLeft, ChevronRight } from '../components/icons'
 import EditTransaction from './EditTransaction'
 
+interface DayGroup {
+  date: string
+  items: Transaction[]
+  wins: Win[]
+  total: number // spending
+  income: number // wins (money in + automatic investing)
+}
+
 export default function TransactionsScreen() {
   const txns = useAllTransactions()
   const settings = useSettings()
+  const payments = useIncomePayments()
+  const sources = useIncomeSources()
+  const assets = useAssets()
   const { accounts, categories, accountMap, categoryMap } = useLookups()
   const [editing, setEditing] = useState<Transaction | null>(null)
   const [filter, setFilter] = useState('')
   const [view, setView] = useState<'list' | 'calendar'>('list')
 
+  // Wins sit alongside expenses, so looking back isn't only a list of losses.
+  const allWins = useMemo(
+    () => winsBetween('0000-01-01', todayISO(), payments ?? [], sources ?? [], assets ?? []),
+    [payments, sources, assets],
+  )
+
   const grouped = useMemo(() => {
+    const q = filter.toLowerCase()
     const list = (txns ?? [])
       .filter((t) => {
-        if (!filter) return true
+        if (!q) return true
         const cat = categoryMap.get(t.categoryId)?.name ?? ''
         const acc = accountMap.get(t.accountId)?.name ?? ''
-        return (t.note + ' ' + cat + ' ' + acc).toLowerCase().includes(filter.toLowerCase())
+        return (t.note + ' ' + cat + ' ' + acc).toLowerCase().includes(q)
       })
       .sort((a, b) => (b.date === a.date ? b.createdAt - a.createdAt : b.date.localeCompare(a.date)))
-    const groups: { date: string; items: Transaction[]; total: number }[] = []
-    for (const t of list) {
-      let g = groups.find((x) => x.date === t.date)
+    const byDate = new Map<string, DayGroup>()
+    const groupFor = (date: string) => {
+      let g = byDate.get(date)
       if (!g) {
-        g = { date: t.date, items: [], total: 0 }
-        groups.push(g)
+        g = { date, items: [], wins: [], total: 0, income: 0 }
+        byDate.set(date, g)
       }
+      return g
+    }
+    for (const t of list) {
+      const g = groupFor(t.date)
       g.items.push(t)
       g.total += t.amount
     }
-    return groups
-  }, [txns, filter, categoryMap])
+    for (const w of allWins) {
+      if (q && !(w.title + ' ' + w.subtitle).toLowerCase().includes(q)) continue
+      const g = groupFor(w.date)
+      g.wins.push(w)
+      g.income += w.amount
+    }
+    return [...byDate.values()].sort((a, b) => b.date.localeCompare(a.date))
+  }, [txns, filter, categoryMap, accountMap, allWins])
 
   const currency = settings?.currency ?? 'RM'
 
@@ -78,9 +114,12 @@ export default function TransactionsScreen() {
               <div key={g.date}>
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-medium text-ink-400">{formatDayLabel(g.date)}</span>
-                  <span className="text-xs text-ink-500 tabular-nums">{formatMoney(g.total, currency)}</span>
+                  <DayTotals spent={g.items.length > 0 ? g.total : null} income={g.income} currency={currency} />
                 </div>
                 <div className="space-y-1">
+                  {g.wins.map((w) => (
+                    <WinRow key={w.id} w={w} currency={currency} />
+                  ))}
                   {g.items.map((t) => (
                     <TxnRow
                       key={t.id}
@@ -99,6 +138,7 @@ export default function TransactionsScreen() {
       ) : (
         <CalendarView
           txns={txns}
+          wins={allWins}
           categoryMap={categoryMap}
           accountMap={accountMap}
           currency={currency}
@@ -107,6 +147,34 @@ export default function TransactionsScreen() {
       )}
 
       <EditTransaction txn={editing} onClose={() => setEditing(null)} />
+    </div>
+  )
+}
+
+function DayTotals({ spent, income, currency }: { spent: number | null; income: number; currency: string }) {
+  return (
+    <span className="text-xs tabular-nums flex items-center gap-2">
+      {income > 0 && <span className="text-good">+{formatMoney(income, currency)}</span>}
+      {spent !== null && <span className="text-ink-500">{formatMoney(spent, currency)}</span>}
+    </span>
+  )
+}
+
+// Money in, or an automatic investment — shown in green, never needs editing.
+function WinRow({ w, currency }: { w: Win; currency: string }) {
+  const sameAsStream = w.title === w.subtitle
+  return (
+    <div className="w-full flex items-center gap-3 py-2.5 px-2 rounded-xl">
+      <span className="h-9 w-9 rounded-full bg-good/15 flex items-center justify-center text-lg shrink-0">
+        {w.kind === 'payment' ? '💼' : '📈'}
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm text-ink-100 truncate">{w.kind === 'investment' ? `Invested · ${w.subtitle}` : w.title}</div>
+        <div className="text-xs text-ink-500">
+          {w.kind === 'investment' ? 'Added automatically' : sameAsStream ? 'Came in' : `${w.subtitle} · came in`}
+        </div>
+      </div>
+      <span className="text-sm font-medium tabular-nums text-good">+{formatMoney(w.amount, currency)}</span>
     </div>
   )
 }
@@ -157,12 +225,14 @@ function TxnRow({
 // Month calendar with each day's net spend; tap a day to see its activity.
 function CalendarView({
   txns,
+  wins,
   categoryMap,
   accountMap,
   currency,
   onEdit,
 }: {
   txns: Transaction[] | undefined
+  wins: Win[]
   categoryMap: Map<string, Category>
   accountMap: Map<string, Account>
   currency: string
@@ -200,6 +270,18 @@ function CalendarView({
   )
   const selectedTotal = dayTxns.reduce((a, b) => a + b.amount, 0)
 
+  const winsByDay = useMemo(() => {
+    const m = new Map<string, Win[]>()
+    for (const w of wins) m.set(w.date, [...(m.get(w.date) ?? []), w])
+    return m
+  }, [wins])
+  const monthIn = useMemo(() => {
+    const prefix = `${year}-${pad(month + 1)}-`
+    return wins.filter((w) => w.date.startsWith(prefix)).reduce((s, w) => s + w.amount, 0)
+  }, [wins, year, month])
+  const dayWins = winsByDay.get(selected) ?? []
+  const dayIn = dayWins.reduce((s, w) => s + w.amount, 0)
+
   // Week starts Monday: shift Sun(0)..Sat(6) so Monday is the first column.
   const lead = (new Date(year, month, 1).getDay() + 6) % 7
   const daysInMonth = new Date(year, month + 1, 0).getDate()
@@ -232,7 +314,10 @@ function CalendarView({
           <div className="text-sm font-medium text-ink-200">
             {ref.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
           </div>
-          <div className="text-xs text-ink-500 tabular-nums">{formatMoney(monthTotal, currency)} spent</div>
+          <div className="text-xs text-ink-500 tabular-nums">
+            {monthIn > 0 && <span className="text-good">+{formatMoney(monthIn, currency)} in · </span>}
+            {formatMoney(monthTotal, currency)} spent
+          </div>
         </div>
         <button onClick={() => goMonth(1)} className="p-2 text-ink-400 hover:text-ink-100">
           <ChevronRight width={20} height={20} />
@@ -268,8 +353,9 @@ function CalendarView({
                     : 'bg-ink-800/25'
               }`}
             >
-              <span className={`text-[10px] self-start ${isToday ? 'text-brand-400 font-bold' : 'text-ink-400'}`}>
-                {d}
+              <span className="flex items-center justify-between self-stretch">
+                <span className={`text-[10px] ${isToday ? 'text-brand-400 font-bold' : 'text-ink-400'}`}>{d}</span>
+                {winsByDay.has(dISO) && <span className="h-1.5 w-1.5 rounded-full bg-good" aria-label="money in" />}
               </span>
               {total != null ? (
                 <span
@@ -291,12 +377,15 @@ function CalendarView({
       <div className="mt-5">
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-medium text-ink-200">{formatDayLabel(selected)}</span>
-          <span className="text-xs text-ink-500 tabular-nums">{formatMoney(selectedTotal, currency)}</span>
+          <DayTotals spent={dayTxns.length > 0 ? selectedTotal : null} income={dayIn} currency={currency} />
         </div>
-        {dayTxns.length === 0 ? (
+        {dayTxns.length === 0 && dayWins.length === 0 ? (
           <p className="text-sm text-ink-500 py-6 text-center">No activity on this day.</p>
         ) : (
           <div className="space-y-1">
+            {dayWins.map((w) => (
+              <WinRow key={w.id} w={w} currency={currency} />
+            ))}
             {dayTxns.map((t) => (
               <TxnRow
                 key={t.id}

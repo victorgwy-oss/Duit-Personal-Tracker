@@ -8,10 +8,14 @@ import type {
   IncomeSource,
   IncomeOverride,
   IncomePayment,
+  Asset,
+  AssetKind,
+  Wellbeing,
 } from './types'
 import { overrideId } from './income'
 import { getCycle, shiftCycle } from './cycle'
-import { fromISO } from './format'
+import { fromISO, todayISO } from './format'
+import { addDaysISO, assetValue } from './wins'
 import { queuePush } from './sync'
 
 // All writes funnel through here so we can (a) stamp updatedAt, (b) soft-delete
@@ -242,6 +246,104 @@ export async function setIncomeOverride(
   const row: IncomeOverride = { id, sourceId, monthKey, amount, updatedAt: now() }
   await db.incomeOverrides.put(row)
   queuePush('incomeOverrides', row)
+}
+
+// ---- Assets (savings, investments, net worth) ----
+
+// Save an asset from what the user sees: its CURRENT value and schedule. If the
+// value or the automatic monthly contribution changed, the figure is re-based on
+// today, so contributions already counted are never counted twice. Contributions
+// start the day after they're switched on (today's value already includes today).
+export async function saveAsset(input: {
+  id?: string
+  name: string
+  kind: AssetKind
+  value: number
+  monthlyAdd?: number
+  addDay?: number
+  inSafetyNet?: boolean
+  color: string
+}): Promise<Asset> {
+  const today = todayISO()
+  const existing = input.id ? await db.assets.get(input.id) : undefined
+  const monthlyAdd = input.kind === 'debt' ? 0 : Math.max(input.monthlyAdd ?? 0, 0)
+  const addDay = monthlyAdd > 0 ? Math.min(Math.max(Math.round(input.addDay ?? 1), 1), 31) : undefined
+
+  let amount = input.value
+  let asOf = today
+  if (existing) {
+    const unchanged =
+      Math.abs(assetValue(existing, today) - input.value) < 0.005 &&
+      (existing.monthlyAdd ?? 0) === monthlyAdd &&
+      (existing.addDay ?? undefined) === addDay
+    if (unchanged) {
+      amount = existing.amount
+      asOf = existing.asOf
+    }
+  }
+  const addSince =
+    monthlyAdd > 0 ? (existing?.monthlyAdd && existing.addSince ? existing.addSince : addDaysISO(today, 1)) : undefined
+
+  const row: Asset = {
+    id: existing?.id ?? uid(),
+    name: input.name,
+    kind: input.kind,
+    amount,
+    asOf,
+    monthlyAdd: monthlyAdd > 0 ? monthlyAdd : undefined,
+    addDay,
+    addSince,
+    inSafetyNet: input.kind === 'investment' ? !!input.inSafetyNet : undefined,
+    color: input.color,
+    updatedAt: now(),
+  }
+  await db.assets.put(row)
+  queuePush('assets', row)
+  return row
+}
+
+// Quick update of just the value (e.g. after checking a statement or withdrawing).
+export async function setAssetValue(id: string, value: number): Promise<void> {
+  const existing = await db.assets.get(id)
+  if (!existing) return
+  const row: Asset = { ...existing, amount: value, asOf: todayISO(), updatedAt: now() }
+  await db.assets.put(row)
+  queuePush('assets', row)
+}
+
+export async function deleteAsset(id: string): Promise<void> {
+  const existing = await db.assets.get(id)
+  if (!existing) return
+  const row: Asset = { ...existing, deleted: true, updatedAt: now() }
+  await db.assets.put(row)
+  queuePush('assets', row)
+}
+
+// ---- Wellbeing preferences ----
+export const DEFAULT_WELLBEING: Wellbeing = {
+  id: 'singleton',
+  forMeMonthly: 0,
+  emergencyLabel: '',
+  emergencyAmount: 0,
+  updatedAt: 0,
+}
+
+export async function saveWellbeing(patch: Partial<Wellbeing>): Promise<void> {
+  const existing = (await db.wellbeing.get('singleton')) ?? DEFAULT_WELLBEING
+  const row: Wellbeing = { ...existing, ...patch, id: 'singleton', updatedAt: now() }
+  await db.wellbeing.put(row)
+  queuePush('wellbeing', row)
+}
+
+// The category whose spending draws from the "Just for me" fund. Reuses one
+// named "Just for me" if it exists (e.g. created on another device), otherwise
+// creates it — so there's never more than one.
+export async function ensureForMeCategory(): Promise<string> {
+  const all = await db.categories.toArray()
+  const found = all.find((c) => !c.archived && c.name.trim().toLowerCase() === 'just for me')
+  if (found) return found.id
+  const cat = await upsertCategory({ name: 'Just for me', group: 'discretionary', color: '#ec4899', icon: '💛', monthlyBudget: 0 })
+  return cat.id
 }
 
 // ---- Settings ----
